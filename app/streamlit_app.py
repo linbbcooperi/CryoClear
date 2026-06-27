@@ -232,13 +232,15 @@ with right:
     st.metric("Micrographs/min", f"{mpm:.1f}")
 
     if gt_path is not None and gt_path.exists():
-        score = metrics.picking_metrics(pred_full, coords.read_star_coords(gt_path),
-                                        radius=RADIUS)
+        gt_xy = coords.read_star_coords(gt_path)
+        before = metrics.picking_metrics(pred_full, gt_xy, radius=RADIUS)
+        after = metrics.picking_metrics(pred_full[~is_junk], gt_xy, radius=RADIUS)
         st.divider()
-        st.caption("Picking vs CryoPPP ground truth")
-        st.metric("F1", f"{score.f1:.3f}")
-        st.caption(f"P={score.precision:.3f} · R={score.recall:.3f} · "
-                   f"TP={score.tp} FP={score.fp} FN={score.fn}")
+        st.caption("Picking F1 vs CryoPPP ground truth")
+        st.metric("F1 after junk triage", f"{after.f1:.3f}",
+                  delta=f"{after.f1 - before.f1:+.3f} vs raw picks")
+        st.caption(f"raw F1={before.f1:.3f} (P={before.precision:.2f} R={before.recall:.2f}) → "
+                   f"kept F1={after.f1:.3f} (P={after.precision:.2f} R={after.recall:.2f})")
 
     st.divider()
     st.caption(f"Corrections fed back: {st.session_state.corrections}")
