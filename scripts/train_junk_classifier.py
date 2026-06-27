@@ -4,7 +4,7 @@ Pipeline (real path):
   1. for each micrograph: load full-res image + CryoSegNet cached candidate coords
   2. label each candidate keep/junk by matching against CryoPPP ground truth
      (matches a GT particle within particle_radius -> keep; otherwise -> junk FP)
-  3. extract features (cryotriage.features.extract_features)
+  3. extract features (cryoclear.features.extract_features)
   4. fit JunkClassifier on a train split; report junk-rejection metrics on a held-out
      split; save the model for the app to load.
 
@@ -21,8 +21,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from cryotriage import config, coords, features, io_mrc, metrics, picker  # noqa: E402
-from cryotriage.junk_classifier import JunkClassifier  # noqa: E402
+from cryoclear import config, coords, features, io_mrc, metrics, picker  # noqa: E402
+from cryoclear.junk_classifier import JunkClassifier  # noqa: E402
 
 
 def _demo() -> int:

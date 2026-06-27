@@ -1,4 +1,4 @@
-# A2 → "CryoTriage Live" — Full Build Plan for QBI Hackathon 2026
+# A2 → "CryoClear" — Full Build Plan for QBI Hackathon 2026
 
 *A winnable, novel cryo-EM project for a 3-person team, engineered for visible results by Sunday 4:30 PM.*
 
@@ -10,7 +10,7 @@
 ## 1. The refined idea (and why it's novel)
 
 ### The one-liner
-> **CryoTriage Live** — an open, real-time cryo-EM "picking copilot" that doesn't just *find* protein particles, it **throws out the junk** (ice, carbon edges, aggregates) as the data streams in, and **gets smarter every time the scientist corrects it.**
+> **CryoClear** — an open, real-time cryo-EM "picking copilot" that doesn't just *find* protein particles, it **throws out the junk** (ice, carbon edges, aggregates) as the data streams in, and **gets smarter every time the scientist corrects it.**
 
 ### Why this, specifically
 In cryo-EM you photograph thousands of frozen protein molecules, then must locate every good "particle" before a 3D structure can be built. Two painful truths:

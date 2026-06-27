@@ -1,4 +1,4 @@
-# CryoTriage Live — Day-1 Build Plan (RunPod + CryoSegNet + M1 + UI)
+# CryoClear — Day-1 Build Plan (RunPod + CryoSegNet + M1 + UI)
 
 > Toolchain note: this repo uses **uv** for env + packaging. `uv sync` makes the venv,
 > installs the project (editable) + dev group, and writes `uv.lock`. `uv run …` auto-syncs.
@@ -52,7 +52,7 @@ The always-working **blob** backend stays as the M0 fallback rung.
    → caches one `.star` per micrograph under `data/processed/10025/cryosegnet/`.
 
 ## Phase C — Wire CryoSegNet into our pipeline (Bindu; DONE in code)
-- `src/cryotriage/picker.py` — `_cryosegnet_pick` reads cached `.star` via `coords.read_star_coords()`,
+- `src/cryoclear/picker.py` — `_cryosegnet_pick` reads cached `.star` via `coords.read_star_coords()`,
   same `(N,2)` contract as `_blob_pick`; `backend="cryosegnet"` in `pick()`. Blob stays as fallback.
 - `scripts/run_baseline.py` — `uv run python scripts/run_baseline.py --backend cryosegnet --empiar 10025`
   prints **precision/recall/F1 vs CryoPPP** (the M1 number; handles full-res vs downsampled coords).

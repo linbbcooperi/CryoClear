@@ -1,9 +1,9 @@
 """Score a picker vs CryoPPP ground truth (the M1 number + the comparison bar).
 
 Pipeline:
-  1. load MRC micrographs for an EMPIAR id (cryotriage.io_mrc)
+  1. load MRC micrographs for an EMPIAR id (cryoclear.io_mrc)
   2. pick particles (cryosegnet = cached .star picks, or blob placeholder)
-  3. score vs CryoPPP ground truth (cryotriage.metrics)
+  3. score vs CryoPPP ground truth (cryoclear.metrics)
 
 Examples:
   python scripts/run_baseline.py --backend cryosegnet --empiar 10025
@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from cryotriage import config, coords, io_mrc, metrics, picker  # noqa: E402
+from cryoclear import config, coords, io_mrc, metrics, picker  # noqa: E402
 
 
 def main() -> int:

@@ -1,6 +1,6 @@
 import numpy as np
 
-from cryotriage import metrics
+from cryoclear import metrics
 
 
 def test_perfect_match():

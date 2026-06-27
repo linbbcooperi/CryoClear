@@ -1,4 +1,4 @@
-# The Idea — CryoTriage Live
+# The Idea — CryoClear
 
 ## One-liner
 An open, real-time cryo-EM **picking copilot** that doesn't just *find* particles — it **throws out the junk** (ice, carbon edges, aggregates) as data streams in, and **gets smarter every time the scientist corrects it.**

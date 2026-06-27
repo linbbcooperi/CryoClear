@@ -2,12 +2,12 @@ import numpy as np
 
 import pytest
 
-from cryotriage import metrics
+from cryoclear import metrics
 
 
 def test_junk_classifier_separates_easy_classes():
     sklearn = pytest.importorskip("sklearn")  # skip if sklearn not installed
-    from cryotriage.junk_classifier import JunkClassifier
+    from cryoclear.junk_classifier import JunkClassifier
 
     rng = np.random.default_rng(0)
     real = rng.normal(0.0, 0.3, size=(200, 8))

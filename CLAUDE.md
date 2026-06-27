@@ -1,9 +1,9 @@
-# CLAUDE.md — CryoTriage Live
+# CLAUDE.md — CryoClear
 
 > Read this first. It is the single source of truth for this project. Detailed background lives in `docs/`.
 
 ## What we're building
-**CryoTriage Live** — an open, real-time cryo-EM **particle-picking + junk-removal copilot**. It picks protein particles from cryo-EM micrographs, **flags/removes junk** (ice, carbon edges, aggregates) as data streams in, and **learns from the scientist's corrections live**.
+**CryoClear** — an open, real-time cryo-EM **particle-picking + junk-removal copilot**. It picks protein particles from cryo-EM micrographs, **flags/removes junk** (ice, carbon edges, aggregates) as data streams in, and **learns from the scientist's corrections live**.
 
 One-liner for judges: *"CryoFSL made few-shot picking accurate; we make picking + junk-cleaning interactive, real-time, and measurable — on a single GPU."*
 
@@ -30,7 +30,7 @@ MRC micrograph → preprocess → picker (Topaz/CryoSegNet) → candidate boxes
 ```
 
 ## Repo layout
-- `src/cryotriage/` — library code (import as `cryotriage`)
+- `src/cryoclear/` — library code (import as `cryoclear`)
   - `io_mrc.py` read/normalize MRC · `coords.py` .star/.box IO · `picker.py` picker wrapper
   - `features.py` per-candidate features · `junk_classifier.py` the novel classifier
   - `active_learning.py` HITL update · `metrics.py` precision/recall/F1 (DONE, tested)
@@ -60,7 +60,7 @@ Build in this exact order. Never break a working rung to chase the next.
 - Pretrained pickers: **Topaz** (baseline), CryoSegNet, CryoFSL. SAM2 optional.
 
 ## Coding conventions
-- Python 3.10, `cryotriage` package, type hints + docstrings, `ruff`/`black` style.
+- Python 3.10, `cryoclear` package, type hints + docstrings, `ruff`/`black` style.
 - **Junk classifier: start SIMPLE** (scikit-learn RandomForest on `features.py`), upgrade to a small CNN only if M1–M3 are solid.
 - Keep per-micrograph inference to a few seconds (cache picks/embeddings).
 - Pure functions in `src/`; keep Streamlit glue in `app/`. Write a test when you add a metric.
@@ -75,9 +75,10 @@ Build in this exact order. Never break a working rung to chase the next.
 
 ## Docs index
 - `docs/00_hackathon_context.md` — dates, venue, scope, rules, agenda, why A2 fits the category
-- `docs/01_idea_cryotriage.md` — the idea + novelty + honest prior art
+- `docs/01_idea_cryoclear.md` — the idea + novelty + honest prior art
 - `docs/02_build_plan.md` — full 48h plan (imported)
 - `docs/07_runpod_build_plan.md` — RunPod + CryoSegNet + M1 Day-1 execution plan (current)
+- `docs/08_runpod.md` — RunPod pod/volume/ports config + `scripts/setup_pod.sh` bootstrap
 - `docs/03_datasets.md` — every dataset/library with links + download steps
 - `docs/04_evals.md` / `eval/EVALS.md` — judging rubric + technical metrics
 - `docs/05_demo_script.md` — 5-min demo + slide outline

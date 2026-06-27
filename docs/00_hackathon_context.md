@@ -25,7 +25,7 @@ Core data types: **light microscopy, electron microscopy (cryo-EM), proteomics/m
 ## Judges & what they reward
 Panel = technically-minded scientists + science-minded developers + VCs. → a **working, demo-able product** with **real numbers** beats a clever notebook.
 
-## Why our project (A2 / CryoTriage Live) fits the category
+## Why our project (A2 / CryoClear) fits the category
 - "cryoEM" is named explicitly in the call.
 - "segment ... particles" is exactly particle picking.
 - "user-friendly interface for command line tools" = wrapping Topaz/CryoSegNet in an interactive GUI.

@@ -536,7 +536,7 @@ wheels = [
 ]
 
 [[package]]
-name = "cryotriage"
+name = "cryoclear"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

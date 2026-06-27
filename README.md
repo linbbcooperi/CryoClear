@@ -1,4 +1,4 @@
-# CryoTriage Live 🧊🔬
+# CryoClear 🧊🔬
 
 An open, real-time cryo-EM **particle-picking + junk-removal copilot** for the QBI Hackathon 2026 (UCSF, June 27–28).
 
@@ -33,7 +33,7 @@ uv pip install -e ".[gpu]"               # ASPIRE for the 2D-class wow (optional
 Full GPU + data + milestone plan: [`docs/07_runpod_build_plan.md`](docs/07_runpod_build_plan.md).
 
 ## What's here
-- `src/cryotriage/` — library (MRC IO, picker wrapper, **junk classifier**, **metrics**, stream simulator)
+- `src/cryoclear/` — library (MRC IO, picker wrapper, **junk classifier**, **metrics**, stream simulator)
 - `app/streamlit_app.py` — interactive picking + junk-triage UI
 - `eval/` — evaluation harness + rubric (`EVALS.md`)
 - `scripts/` — data download + baseline + training helpers

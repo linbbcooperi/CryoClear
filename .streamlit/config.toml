@@ -1,4 +1,4 @@
-# CryoTriage Live — UI theme. A clean dark look so the demo doesn't look default.
+# CryoClear — UI theme. A clean dark look so the demo doesn't look default.
 [theme]
 base = "dark"
 primaryColor = "#3ddc97"          # accent (keep-green)

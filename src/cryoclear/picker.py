@@ -43,7 +43,7 @@ def _blob_pick(image: np.ndarray, min_sigma: float = 4, max_sigma: float = 12,
     from skimage.feature import blob_log
 
     img = image.astype(float)
-    img = (img - img.min()) / (img.ptp() + 1e-6)
+    img = (img - img.min()) / (np.ptp(img) + 1e-6)  # np.ptp: ndarray.ptp() removed in NumPy 2.0
     blobs = blob_log(img, min_sigma=min_sigma, max_sigma=max_sigma, threshold=threshold)
     if blobs.size == 0:
         return np.zeros((0, 2))

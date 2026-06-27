@@ -3,7 +3,7 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cryotriage"
+name = "cryoclear"
 version = "0.1.0"
 description = "Real-time cryo-EM particle-picking + junk-removal copilot (QBI Hackathon 2026)"
 readme = "README.md"

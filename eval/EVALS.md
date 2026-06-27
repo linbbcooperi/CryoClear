@@ -5,7 +5,7 @@ Two layers: (A) the **technical metrics** that produce our "visible results," an
 
 ## A. Technical metrics (run `python eval/run_eval.py`)
 1. **Picking precision / recall / F1** vs CryoPPP expert ground truth.
-   - A predicted particle is a TP if within `particle_radius` px of an unmatched GT particle (greedy match — see `src/cryotriage/metrics.py`).
+   - A predicted particle is a TP if within `particle_radius` px of an unmatched GT particle (greedy match — see `src/cryoclear/metrics.py`).
    - **Target: beat the Topaz baseline** (run `scripts/run_baseline.py` to get it).
 2. **Junk-rejection precision / recall / F1** (positive class = junk).
    - Uses CryoPPP's labeled false positives (ice, carbon edges, aggregates).

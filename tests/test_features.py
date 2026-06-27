@@ -1,6 +1,6 @@
 import numpy as np
 
-from cryotriage import features
+from cryoclear import features
 
 
 def test_feature_shape_and_names():

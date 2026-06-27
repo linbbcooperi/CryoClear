@@ -19,7 +19,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from cryotriage import metrics  # noqa: E402
+from cryoclear import metrics  # noqa: E402
 
 
 def _demo() -> int:
@@ -47,7 +47,7 @@ def _demo() -> int:
 
 
 def _score_files(pred_path: str, gt_path: str, radius: float) -> int:
-    from cryotriage import coords
+    from cryoclear import coords
 
     pred = coords.read_box_coords(pred_path) if pred_path.endswith(".box") \
         else coords.read_star_coords(pred_path)
@@ -59,7 +59,7 @@ def _score_files(pred_path: str, gt_path: str, radius: float) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="CryoTriage evaluation harness")
+    ap = argparse.ArgumentParser(description="CryoClear evaluation harness")
     ap.add_argument("--demo", action="store_true", help="run on synthetic data")
     ap.add_argument("--pred", help="predicted coords (.box or .star)")
     ap.add_argument("--gt", help="ground-truth coords (.box or .star)")

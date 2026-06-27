@@ -1,4 +1,4 @@
-"""CryoTriage Live — interactive picking + junk-triage copilot (Bindu).
+"""CryoClear — interactive picking + junk-triage copilot (Bindu).
 
 Run:  streamlit run app/streamlit_app.py --server.port 8501 --server.address 0.0.0.0
 
@@ -24,11 +24,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import streamlit as st  # noqa: E402
 
-from cryotriage import (  # noqa: E402
+from cryoclear import (  # noqa: E402
     config, coords, features, io_mrc, metrics, picker,
 )
-from cryotriage.active_learning import ActiveLearner  # noqa: E402
-from cryotriage.junk_classifier import JunkClassifier  # noqa: E402
+from cryoclear.active_learning import ActiveLearner  # noqa: E402
+from cryoclear.junk_classifier import JunkClassifier  # noqa: E402
 
 # optional: pixel-accurate click-to-reject (pip install streamlit-image-coordinates)
 try:
@@ -37,7 +37,7 @@ try:
 except Exception:
     _HAVE_CLICK = False
 
-st.set_page_config(page_title="CryoTriage Live", page_icon="🧊", layout="wide")
+st.set_page_config(page_title="CryoClear", page_icon="🧊", layout="wide")
 
 # ---------------------------------------------------------------- styling
 st.markdown(
@@ -56,7 +56,7 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-st.markdown("# 🧊 CryoTriage Live")
+st.markdown("# 🧊 CryoClear")
 st.markdown(
     '<div class="subtitle">Real-time particle-picking + junk-triage copilot — '
     "picks, flags junk (ice / carbon / aggregates), and learns from your corrections.</div>",
@@ -203,7 +203,7 @@ with left:
                        edgecolors="#e74c3c", linewidths=1.3, label="junk")
     ax.set_axis_off()
     fig.tight_layout(pad=0)
-    st.pyplot(fig, use_container_width=True)
+    st.pyplot(fig, width="stretch")
     st.markdown(
         '<div class="legend"><span><span class="dot" style="background:#2ecc71"></span>'
         'keep</span><span><span class="dot" style="background:#e74c3c"></span>junk</span></div>',

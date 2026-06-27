@@ -32,7 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from cryotriage import config  # noqa: E402
+from cryoclear import config  # noqa: E402
 
 
 def _run(cmd: list[str], cwd: Path, dry: bool) -> None:

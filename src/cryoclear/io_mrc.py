@@ -1,7 +1,7 @@
 """MRC micrograph I/O and preprocessing (Tony).
 
 Reads .mrc files, normalizes to a viewable 8-bit image, optional downsample.
-`mrcfile` is imported lazily so `import cryotriage` works without it installed.
+`mrcfile` is imported lazily so `import cryoclear` works without it installed.
 """
 from __future__ import annotations
 
