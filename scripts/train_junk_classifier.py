@@ -58,7 +58,8 @@ def _label_candidates(pred_xy: np.ndarray, gt_xy: np.ndarray, radius: float) -> 
 
 
 def _train_real(empiar: str, cache_dir: Path, radius: float, box: int,
-                out_path: Path, test_frac: float = 0.2, seed: int = 0) -> int:
+                out_path: Path, backend: str = "cryosegnet", downsample: int = 4,
+                test_frac: float = 0.2, seed: int = 0) -> int:
     raw = config.RAW / empiar
     mics = sorted((raw / "micrographs").glob("*.mrc"))
     gts = sorted((raw / "ground_truth").glob("*.star"))
@@ -70,11 +71,15 @@ def _train_real(empiar: str, cache_dir: Path, radius: float, box: int,
     for mic, gt in zip(mics, gts):
         # full-res image so candidate coords (full-res) align with the crops
         img = io_mrc.normalize_8bit(io_mrc.load_mrc(mic))
-        try:
-            pred = picker.pick(img, backend="cryosegnet", name=mic.name, cache_dir=cache_dir)
-        except FileNotFoundError as e:
-            print(f"  skip {mic.name}: {e}")
-            continue
+        if backend == "cryosegnet":
+            try:
+                pred = picker.pick(img, backend="cryosegnet", name=mic.name, cache_dir=cache_dir)
+            except FileNotFoundError as e:
+                print(f"  skip {mic.name}: {e}")
+                continue
+        else:  # blob runs on the downsampled image -> scale centres back to full-res
+            pred = picker.pick(io_mrc.load_for_pipeline(mic, factor=downsample),
+                               backend="blob") * float(downsample)
         if len(pred) == 0:
             continue
         gt_xy = coords.read_star_coords(gt)
@@ -115,6 +120,9 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--demo", action="store_true", help="synthetic sanity loop (no data needed)")
     ap.add_argument("--empiar", default=config.DEMO_EMPIAR_ID)
+    ap.add_argument("--backend", default="cryosegnet", choices=["blob", "cryosegnet"],
+                    help="candidate source: cryosegnet (cached .star) or blob")
+    ap.add_argument("--downsample", type=int, default=4)
     ap.add_argument("--radius", type=float, default=config.particle_radius_px())
     ap.add_argument("--box", type=int, default=config.DEMO_PARTICLE_DIAMETER_PX,
                     help="crop size (px) for features; ~particle diameter at full res")
@@ -131,7 +139,8 @@ def main() -> int:
     out_path = Path(args.out) if args.out else (
         config.PROCESSED / args.empiar / "junk_classifier.joblib")
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    return _train_real(args.empiar, cache_dir, args.radius, args.box, out_path)
+    return _train_real(args.empiar, cache_dir, args.radius, args.box, out_path,
+                       backend=args.backend, downsample=args.downsample)
 
 
 if __name__ == "__main__":

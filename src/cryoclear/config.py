@@ -12,7 +12,7 @@ PROCESSED = DATA / "processed"
 # CryoPPP (no labels), so the labeled hero is a CryoPPP protein. 10017 = β-gal.
 # Other CryoPPP options: 10005 (lightest, ~14 GB), 10081 (TMV). See docs/03_datasets.md.
 DEMO_EMPIAR_ID = "10017"          # β-galactosidase — labeled in CryoPPP (has ground truth)
-DEMO_PARTICLE_DIAMETER_PX = 180   # approx; tune per dataset — the download script prints
+DEMO_PARTICLE_DIAMETER_PX = 108   # measured median for 10017 (download script prints this);
                                   # the median Diameter from CryoPPP CSVs (used as 2*radius)
 
 # Unlabeled dataset for the visual / streaming demo only (no CryoPPP ground truth):
