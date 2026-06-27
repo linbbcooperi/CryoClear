@@ -16,10 +16,12 @@ echo "[2/3] torch cu128 (Blackwell sm_120)"
 uv pip install --python "$VENV/bin/python" \
     --index-url https://download.pytorch.org/whl/cu128 torch torchvision 2>&1 | tail -3
 
-echo "[3/3] CryoSegNet runtime deps (PyPI)"
+echo "[3/3] CryoSegNet runtime deps — PINNED to environment.yml versions so its code"
+echo "      runs unchanged (scipy.signal.gaussian etc. were removed in newer scipy)"
 uv pip install --python "$VENV/bin/python" \
-    segment-anything opencv-python-headless mrcfile matplotlib scipy pandas numpy \
-    tqdm pyyaml scikit-image timm wandb 2>&1 | tail -3
+    "numpy<2" "scipy==1.9.1" "matplotlib==3.5.2" "opencv-python-headless==4.7.0.72" \
+    "pandas==2.0.3" "segment-anything==1.0" "mrcfile==1.4.3" \
+    tqdm pyyaml scikit-image 2>&1 | tail -3
 
 echo "[verify] torch + a real CUDA matmul on this GPU"
 "$VENV/bin/python" - <<'PY'
