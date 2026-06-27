@@ -67,7 +67,9 @@ st.markdown(
 with st.sidebar:
     st.header("Controls")
     empiar = st.text_input("EMPIAR id", value=config.DEMO_EMPIAR_ID)
-    backend_label = st.selectbox("Picker backend", ["cryosegnet (cached)", "blob (placeholder)"])
+    backend_label = st.selectbox(
+        "Picker backend",
+        ["blob — LoG (over-picks → best junk-triage demo)", "cryosegnet (cached)"])
     backend = "cryosegnet" if backend_label.startswith("cryosegnet") else "blob"
     factor = st.slider("Downsample factor", 1, 8, 4)
     box = st.slider("Feature box (px, display)", 24, 128, 64, 8)
