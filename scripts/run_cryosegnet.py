@@ -41,13 +41,35 @@ def _run(cmd: list[str], cwd: Path, dry: bool) -> None:
         subprocess.run(cmd, cwd=str(cwd), check=True)
 
 
-def _collect_stars(output_path: Path, cache_dir: Path) -> int:
-    """Copy every .star CryoSegNet produced into our cache, keyed by stem."""
+def _split_combined_star(combined: Path, cache_dir: Path) -> int:
+    """Split CryoSegNet's combined .star (rlnMicrographName + coords) into one
+    cache .star per micrograph, matching the `cryosegnet` picker backend."""
+    import numpy as np
+    import starfile
+
+    from cryoclear import coords
+
     cache_dir.mkdir(parents=True, exist_ok=True)
-    found = sorted(output_path.rglob("*.star"))
-    for star in found:
-        shutil.copy(star, cache_dir / f"{star.stem}.star")
-    return len(found)
+    if not combined.exists():
+        return 0
+    data = starfile.read(str(combined))
+    df = data
+    if isinstance(data, dict):
+        for block in data.values():
+            if {"rlnCoordinateX", "rlnCoordinateY"}.issubset(getattr(block, "columns", [])):
+                df = block
+                break
+    name_col = next((c for c in df.columns if "MicrographName" in c), None)
+    if name_col is None:
+        return 0
+    n = 0
+    for name, grp in df.groupby(name_col):
+        stem = Path(str(name)).stem
+        xy = np.stack([grp["rlnCoordinateX"].to_numpy(dtype=float),
+                       grp["rlnCoordinateY"].to_numpy(dtype=float)], axis=1)
+        coords.write_star_coords(cache_dir / f"{stem}.star", xy)
+        n += 1
+    return n
 
 
 def main() -> int:
@@ -77,25 +99,26 @@ def main() -> int:
     print(f"Raw output      : {out_dir}")
     print(f"Cache (.star)   : {cache_dir}\n")
 
-    # 1) inference on motion-corrected .mrc files (run with CryoSegNet's own python)
-    _run([args.python, "predict_new_data_mrc.py",
+    star_dir = out_dir / "star_files"
+    star_dir.mkdir(parents=True, exist_ok=True)
+    combined = star_dir / "cryosegnet.star"
+
+    # generate_starfile_new_data_mrc.py runs SAM inference itself and writes ONE
+    # combined .star (rlnMicrographName + coords). Pass it the dataset/output paths.
+    _run([args.python, "generate_starfile_new_data_mrc.py",
           "--my_dataset_path", str(mic_dir),
           "--output_path", str(out_dir),
+          "--file_name", "cryosegnet.star",
           "--device", args.device], cwd=cs_dir, dry=args.dry_run)
 
-    # 2) generate STAR coordinates from the predictions
-    _run([args.python, "generate_starfile_new_data_mrc.py"],
-         cwd=cs_dir, dry=args.dry_run)
-
     if args.dry_run:
-        print("\n[dry-run] skipped execution + .star collection.")
+        print("\n[dry-run] skipped execution + star split.")
         return 0
 
-    n = _collect_stars(out_dir, cache_dir)
-    print(f"\nCollected {n} .star file(s) -> {cache_dir}")
+    n = _split_combined_star(combined, cache_dir)
+    print(f"\nSplit {n} micrograph .star file(s) -> {cache_dir}")
     if n == 0:
-        print("WARNING: no .star found. Check CryoSegNet's --output_path / generate step,"
-              " then adjust _collect_stars().")
+        print(f"WARNING: no per-micrograph picks. Check {combined} and _split_combined_star().")
         return 1
     print("Done. Score with:  python scripts/run_baseline.py --backend cryosegnet "
           f"--empiar {args.empiar}")
