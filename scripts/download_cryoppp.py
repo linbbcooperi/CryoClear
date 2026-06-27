@@ -46,7 +46,10 @@ EMPIAR_BASE = "https://ftp.ebi.ac.uk/empiar/world_availability/{empiar}/data/{su
 
 
 def _curl(url: str, out: Path, dry: bool, insecure: bool = False) -> None:
-    cmd = ["curl", "-L", "--fail", "--retry", "3", "-o", str(out), url]
+    if out.exists() and out.stat().st_size > 0:
+        print(f"  (already present, skip download) {out}")
+        return
+    cmd = ["curl", "-L", "--fail", "--retry", "3", "-C", "-", "-o", str(out), url]
     if insecure:
         cmd.insert(1, "-k")
     print("  $", " ".join(cmd))
@@ -69,20 +72,26 @@ def _download_cryoppp(empiar: str, n: int, dry: bool, insecure: bool) -> int:
 
     mic_dir.mkdir(parents=True, exist_ok=True)
     gt_dir.mkdir(parents=True, exist_ok=True)
-    # tolerant extraction: grab any micrographs + coordinate CSVs in the archive
-    subprocess.run(
-        ["tar", "-xzf", str(tar_path), "-C", str(raw), "--wildcards",
-         "*/micrographs/*", "*/ground_truth/*"],
-        check=True,
-    )
+    # Extract only if not already done. `--no-same-owner -m` avoids chown/utime
+    # errors on network filesystems (MooseFS), and check=False tolerates the
+    # harmless "Cannot change ownership" warnings (tar still exits non-zero).
+    if not list(raw.glob("*/micrographs/*.mrc")):
+        subprocess.run(
+            ["tar", "--no-same-owner", "-m", "-xzf", str(tar_path), "-C", str(raw),
+             "--wildcards", "*/micrographs/*", "*/ground_truth/*"],
+            check=False,
+        )
 
-    mics = sorted(raw.rglob("micrographs/*.mrc"))[:n]
+    mics = sorted(raw.glob("*/micrographs/*.mrc"))[:n]   # nested extraction, not the flat copies
     if not mics:
         print("No micrographs found in the tarball — inspect its layout:")
         subprocess.run(["tar", "-tzf", str(tar_path)], check=False)
         return 1
 
-    csvs = {p.stem: p for p in raw.rglob("*.csv")}
+    # prefer per-micrograph coordinate CSVs (ground_truth/particle_coordinates/)
+    csvs = {p.stem: p for p in raw.rglob("particle_coordinates/*.csv")}
+    if not csvs:
+        csvs = {p.stem: p for p in raw.rglob("*.csv")}
     kept, diam = 0, None
     for mic in mics:
         dest_mic = mic_dir / mic.name
