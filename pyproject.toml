@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cryotriage"
+version = "0.1.0"
+description = "Real-time cryo-EM particle-picking + junk-removal copilot (QBI Hackathon 2026)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Tony, Eva, Bindu" }]
+
+# Runtime deps (CPU-friendly). GPU/picker libs (torch CUDA build, CryoSegNet, ASPIRE)
+# are installed separately on the workstation — see the `gpu` extra and docs/03_datasets.md.
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "pandas>=2.0",
+    "scikit-image>=0.21",
+    "scikit-learn>=1.3",
+    "opencv-python-headless>=4.8",
+    "matplotlib>=3.7",
+    "mrcfile>=1.4",
+    "starfile>=0.5",
+    "streamlit>=1.30",
+    "streamlit-image-coordinates>=0.1.6",
+    "joblib>=1.3",
+]
+
+[project.optional-dependencies]
+# Heavy, install on the GPU box only:  uv pip install -e ".[gpu]"
+# (torch must match the box's CUDA — install from pytorch.org first.)
+gpu = ["aspire"]   # 2D-class "wow"; torch + CryoSegNet are installed out-of-band
+
+# uv-native dev group — installed by default on `uv sync`.
+[dependency-groups]
+dev = ["pytest>=7.4", "ruff>=0.1"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

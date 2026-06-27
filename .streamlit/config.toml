@@ -1,0 +1,16 @@
+# CryoTriage Live — UI theme. A clean dark look so the demo doesn't look default.
+[theme]
+base = "dark"
+primaryColor = "#3ddc97"          # accent (keep-green)
+backgroundColor = "#0d1117"
+secondaryBackgroundColor = "#11161c"
+textColor = "#e6edf3"
+font = "sans serif"
+
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = false       # simplifies access via the RunPod HTTP proxy
+
+[browser]
+gatherUsageStats = false

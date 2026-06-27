@@ -1,0 +1,23 @@
+# NOTE: pyproject.toml + uv.lock are the source of truth (`uv sync`).
+# This file is a pip fallback only (e.g. quick venv on the GPU box). Keep in sync.
+#
+# Core scaffold deps (CPU-friendly; install GPU torch separately on the venue workstation)
+numpy>=1.24
+scipy>=1.10
+pandas>=2.0
+scikit-image>=0.21
+scikit-learn>=1.3
+opencv-python-headless>=4.8
+matplotlib>=3.7
+mrcfile>=1.4          # read/write MRC micrographs
+starfile>=0.5         # read/write .star coordinate files
+streamlit>=1.30       # interactive UI
+streamlit-image-coordinates>=0.1.6  # click-to-reject on the micrograph (active learning)
+joblib>=1.3           # JunkClassifier.save/load
+pytest>=7.4
+
+# --- add on the workstation / when wiring real models ---
+# torch (install the CUDA build that matches the box: see pytorch.org)
+# topaz-em            # baseline picker  (https://github.com/tbepler/topaz)
+# aspire              # 2D classification "wow" (https://github.com/ComputationalCryoEM/ASPIRE-Python)
+# segment-anything-2  # optional, prompt-based route
