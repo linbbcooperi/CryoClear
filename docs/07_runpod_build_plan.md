@@ -19,8 +19,8 @@ The always-working **blob** backend stays as the M0 fallback rung.
 
 ## What you need
 - **RunPod** account + credit. GPU: **RTX 4090 (24 GB)** or A5000/A40. (Venue 2080 Ti, 11 GB, also works.)
-- **RunPod Network Volume** (~50–100 GB) mounted at `/workspace` so data + weights + repos survive pod
-  restarts. Do this first.
+- **RunPod Network Volume (80 GB)** mounted at `/workspace` so data + weights + repos survive pod
+  restarts. Do this first. (~$0.55/weekend; sizing + cost detail in `docs/08_runpod.md`.)
 - **CryoPPP / EMPIAR**: no login for EMPIAR; CryoPPP metadata sheet gives per-protein paths
   (`docs/03_datasets.md`). Download **only EMPIAR-10025** (tens of GB), not the 2.6 TB full set.
 - Local machine: a browser + SSH client; Streamlit reached via RunPod's HTTP proxy (port 8501).
