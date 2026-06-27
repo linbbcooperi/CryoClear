@@ -97,6 +97,12 @@ def _list_micrographs(empiar_id: str) -> list[str]:
     return [p.name for p in sorted((config.RAW / empiar_id / "micrographs").glob("*.mrc"))]
 
 
+@st.cache_data(show_spinner=False)
+def _load_full_res(path_str: str) -> np.ndarray:
+    """Full-res 8-bit micrograph — features for the junk model must match training."""
+    return io_mrc.normalize_8bit(io_mrc.load_mrc(path_str))
+
+
 def _load_model() -> JunkClassifier | None:
     if MODEL_PATH.exists():
         try:
@@ -166,9 +172,16 @@ else:
     gt_path = None
 
 pred_disp, pred_full = _picks(img, sel)
-feats = features.extract_features(img, pred_disp, box=box)
 
 clf = _load_model()
+# Extract features the SAME way the model was trained: full-res image at full-res
+# coords with the dataset box. (Synthetic/no-model path uses the display image.)
+if have_real and sel is not None and clf is not None and len(pred_full):
+    img_full = _load_full_res(str(RAW / "micrographs" / sel))
+    feats = features.extract_features(img_full, pred_full, box=config.DEMO_PARTICLE_DIAMETER_PX)
+else:
+    feats = features.extract_features(img, pred_disp, box=box)
+
 if clf is not None and len(feats):
     is_junk = np.asarray(clf.predict_is_junk(feats, threshold=threshold), dtype=bool)
 else:
