@@ -56,6 +56,9 @@ def main() -> int:
                     help="path to the cloned CryoSegNet repo (with weights downloaded)")
     ap.add_argument("--empiar", default=config.DEMO_EMPIAR_ID)
     ap.add_argument("--device", default="cuda:0")
+    ap.add_argument("--python", default=sys.executable,
+                    help="python interpreter to run CryoSegNet (use its conda env's python, "
+                         "e.g. /workspace/miniconda3/envs/cryosegnet/bin/python)")
     ap.add_argument("--dry-run", action="store_true", help="print commands, don't run")
     args = ap.parse_args()
 
@@ -74,14 +77,14 @@ def main() -> int:
     print(f"Raw output      : {out_dir}")
     print(f"Cache (.star)   : {cache_dir}\n")
 
-    # 1) inference on motion-corrected .mrc files
-    _run([sys.executable, "predict_new_data_mrc.py",
+    # 1) inference on motion-corrected .mrc files (run with CryoSegNet's own python)
+    _run([args.python, "predict_new_data_mrc.py",
           "--my_dataset_path", str(mic_dir),
           "--output_path", str(out_dir),
           "--device", args.device], cwd=cs_dir, dry=args.dry_run)
 
     # 2) generate STAR coordinates from the predictions
-    _run([sys.executable, "generate_starfile_new_data_mrc.py"],
+    _run([args.python, "generate_starfile_new_data_mrc.py"],
          cwd=cs_dir, dry=args.dry_run)
 
     if args.dry_run:
