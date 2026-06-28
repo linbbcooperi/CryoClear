@@ -90,9 +90,11 @@ class JunkClassifier:
         we append to the running set and refit (active_learning.py owns the buffer); both
         fit in well under a second.
         """
-        if self.model_type == "sgd" and self._fitted:
+        y = np.asarray(is_junk).astype(int)
+        # partial_fit needs both classes in the batch when class_weight="balanced"
+        # (it recomputes weights per call); fall back to a full fit otherwise.
+        if self.model_type == "sgd" and self._fitted and len(np.unique(y)) >= 2:
             X = np.asarray(features, dtype=float)
-            y = np.asarray(is_junk).astype(int)
             scaler = self.model.named_steps["scaler"]
             self.model.named_steps["sgd"].partial_fit(scaler.transform(X), y)
             return self

@@ -38,7 +38,7 @@ app = FastAPI(title="CryoClear")
 CLF_OPTIONS = {
     "lgbm": {"label": "LightGBM — boosted trees (robust, default)", "heldout": 0.248, "thr": 0.60},
     "rf": {"label": "RandomForest — needs high threshold or over-rejects", "heldout": 0.248, "thr": 0.85},
-    "sgd": {"label": "SGD log-loss — true online active learning (partial_fit)", "heldout": 0.243, "thr": 0.50},
+    "sgd": {"label": "SGD log-loss — fast linear, instant refit (active learning)", "heldout": 0.243, "thr": 0.50},
     "cnn": {"label": "CNN — learned on raw 64px crops", "heldout": 0.248, "thr": 0.50},
 }
 
@@ -114,7 +114,7 @@ class State:
         self.overrides: dict[str, dict] = {}   # {stem: {idx: label}} manual HITL corrections
         self.undo_stack: list[dict] = []       # each: {stem, prev:{idx: prior_label_or_None}}
         self.redo_stack: list[dict] = []
-        self.learner = ActiveLearner(JunkClassifier(model_type="sgd"))  # true online partial_fit
+        self.learner = ActiveLearner(JunkClassifier(model_type="sgd"))  # fast linear learner (ms refit on the buffer)
         self.coldstart = True
         self.corrections = 0
         self.f1_history: list[float] = []
@@ -159,7 +159,7 @@ class State:
 
     def _seed_learner(self, coldstart: bool):
         tbl = self._train_table()
-        self.learner = ActiveLearner(JunkClassifier(model_type="sgd"))  # true online partial_fit
+        self.learner = ActiveLearner(JunkClassifier(model_type="sgd"))  # fast linear learner (ms refit on the buffer)
         self.coldstart = coldstart
         self.corrections = 0
         self.f1_history = []
