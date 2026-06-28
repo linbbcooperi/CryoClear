@@ -7,7 +7,7 @@ const J = (url, body) => fetch(url, {
 const G = (url) => fetch(url).then(r => r.json());
 
 // ---------------------------------------------------------------- canvas viewer + HITL
-function Viewer({ empiar, stem, picks, factor, brush, tool, onCorrect }) {
+function Viewer({ empiar, stem, picks, factor, brush, tool, onCorrect, threshold, showUncertain }) {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
   const imgRef = useRef(new Image());
@@ -48,10 +48,20 @@ function Viewer({ empiar, stem, picks, factor, brush, tool, onCorrect }) {
     bx.drawImage(img, 0, 0);
     if (picks) {
       bx.lineWidth = 1.4;
+      const sc = picks.score || [];
       for (let i = 0; i < picks.x.length; i++) {
         const junk = picks.junk[i];
-        bx.strokeStyle = junk ? 'rgba(229,72,77,.85)' : 'rgba(41,195,147,.95)';
-        bx.beginPath(); bx.arc(picks.x[i], picks.y[i], junk ? R * 0.7 : R, 0, 6.2832); bx.stroke();
+        // uncertainty-guided review: candidates with junk-prob near the threshold are the
+        // ones the model is least sure about — correcting these teaches it the most.
+        const uncertain = showUncertain && sc.length && Math.abs(sc[i] - threshold) < 0.1;
+        if (uncertain) {
+          bx.strokeStyle = 'rgba(216,166,87,.95)'; bx.setLineDash([3, 3]);
+          bx.beginPath(); bx.arc(picks.x[i], picks.y[i], R, 0, 6.2832); bx.stroke();
+          bx.setLineDash([]);
+        } else {
+          bx.strokeStyle = junk ? 'rgba(229,72,77,.85)' : 'rgba(41,195,147,.95)';
+          bx.beginPath(); bx.arc(picks.x[i], picks.y[i], junk ? R * 0.7 : R, 0, 6.2832); bx.stroke();
+        }
       }
     }
   };
@@ -81,7 +91,7 @@ function Viewer({ empiar, stem, picks, factor, brush, tool, onCorrect }) {
     img.onload = () => { draw(); fit(); };
     img.src = `/api/img/${empiar}/${stem}.png`;
   }, [empiar, stem]);
-  useEffect(() => { draw(); }, [picks]);
+  useEffect(() => { draw(); }, [picks, showUncertain, threshold]);
   useEffect(() => {
     const w = wrapRef.current; if (!w) return;
     const onWheel = (e) => { e.preventDefault(); const r = w.getBoundingClientRect();
@@ -175,6 +185,7 @@ function App() {
   const [picker, setPicker] = useState('blob');
   const [brush, setBrush] = useState('junk');
   const [tool, setTool] = useState('select');
+  const [showUncertain, setShowUncertain] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -329,6 +340,7 @@ function App() {
   if (!info) return html`<div style=${{ padding: 40, color: '#7e8da3' }}>Loading CryoClear…</div>`;
   const pa = met && met.picking_after, pb = met && met.picking_before;
   const jr = met && met.junk_rejection;
+  const nUncertain = picks && picks.score ? picks.score.filter(s => Math.abs(s - threshold) < 0.1).length : 0;
 
   return html`<div class="app">
     <div class="hdr">
@@ -376,7 +388,7 @@ function App() {
           <span class="lbl">scroll = zoom · ${tool === 'pan' ? 'drag = pan' : `drag a box to ${brush} · click toggles one`}</span>
         </div>
         <${Viewer} empiar=${empiar} stem=${stem} picks=${picks} factor=${info.factor}
-           brush=${brush} tool=${tool} onCorrect=${onCorrect} />
+           brush=${brush} tool=${tool} onCorrect=${onCorrect} threshold=${threshold} showUncertain=${showUncertain} />
         <div class="legend">
           <span><span class="sw" style=${{ background: '#29c393' }}></span>keep ${picks ? picks.junk.filter(v => !v).length : 0}</span>
           <span><span class="sw" style=${{ background: '#e5484d' }}></span>junk ${picks ? picks.junk.filter(v => v).length : 0}</span>
@@ -449,6 +461,13 @@ function App() {
           <div class="note">${mode === 'learn'
             ? 'Cold-start: the model starts junk-blind. Dump/keep particles and the junk-rejection F1 climbs as it learns.'
             : 'Pre-trained junk classifier. Your dump/keep corrections override individual particles instantly.'}</div>
+          <div class="row" style=${{ marginTop: '8px' }}>
+            <button class=${'sm' + (showUncertain ? ' primary' : '')} onClick=${() => setShowUncertain(v => !v)}>
+              ${showUncertain ? 'Hide' : 'Show'} uncertain (${nUncertain})</button>
+          </div>
+          <div class="note">Guided active learning: amber rings = candidates the model is least sure about
+            (junk-prob near the threshold). Correcting <i>these</i> teaches it fastest — most tools make you
+            hunt; we surface the highest-value corrections.</div>
           ${f1hist.length > 1 ? html`<${Plot} h=${130}
             data=${[{ type: 'scatter', mode: 'lines+markers', y: f1hist, line: { color: '#38bdf8' } }]}
             layout=${{ yaxis: { range: [0, 1], title: 'junk-F1' }, xaxis: { title: 'corrections' } }} />` : null}
