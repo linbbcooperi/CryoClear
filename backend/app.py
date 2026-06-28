@@ -34,11 +34,14 @@ app = FastAPI(title="CryoClear")
 # Held-out picking F1 on EMPIAR-10017 with the DoG+NMS picker (raw blob = 0.380; the
 # stronger picker raised the floor, so the classifier should be conservative — high
 # threshold — and the triage gain is smaller but the absolute number is higher).
+# `thr` = the operating point where the classifier removes its confident junk while
+# keeping the real particles (kept-set precision rises, recall ~flat → triage beats raw
+# picks). `heldout` = the conservative held-out picking F1 (in-sample is higher).
 CLF_OPTIONS = {
-    "lgbm": {"label": "LightGBM — boosted trees (robust, default)", "heldout": 0.380, "thr": 0.70},
-    "rf": {"label": "RandomForest — high junk-recall, run at a high threshold", "heldout": 0.380, "thr": 0.85},
-    "sgd": {"label": "SGD log-loss — fast linear, instant refit (active learning)", "heldout": 0.380, "thr": 0.80},
-    "cnn": {"label": "CNN — learned on raw 64px crops", "heldout": 0.380, "thr": 0.75},
+    "lgbm": {"label": "LightGBM — boosted trees (robust, default)", "heldout": 0.380, "thr": 0.60},
+    "rf": {"label": "RandomForest — high junk-recall", "heldout": 0.380, "thr": 0.60},
+    "sgd": {"label": "SGD log-loss — fast linear, online (active learning)", "heldout": 0.380, "thr": 0.55},
+    "cnn": {"label": "CNN — learned on raw 64px crops", "heldout": 0.380, "thr": 0.55},
 }
 
 # Preloaded datasets selectable in the UI. 10017 has CryoPPP ground truth (full metrics);
