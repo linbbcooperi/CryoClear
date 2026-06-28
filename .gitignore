@@ -34,3 +34,4 @@ dist/
 
 # local Claude Code settings (keep private)
 .claude/settings.local.json
+samples/*.mrc
