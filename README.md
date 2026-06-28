@@ -1,9 +1,10 @@
-# CryoClear 🧊🔬
+# CryoClear
 
-An open, real-time cryo-EM **particle-picking + junk-removal copilot** 
-It picks protein particles from cryo-EM micrographs, **flags and removes junk** (ice, carbon edges, aggregates) as the data streams in, and **gets smarter every time the scientist corrects it** — and it reports real metrics against expert ground truth.
+**An open, real-time platform for cryo-EM particle picking + junk triage, with a human-in-the-loop learning loop.**
 
-> Built on top of state-of-the-art pickers (Topaz, CryoSegNet, CryoFSL). We don't claim a new picking model — our contribution is the **interactive, real-time junk-triage product** and a measurable junk classifier.
+CryoClear sits on top of any picker, classifies each candidate as keep or junk (ice, carbon edges, aggregates) as micrographs stream in, lets the scientist correct it in bulk on an interactive canvas, learns from those corrections live, and reports honest precision/recall/F1 against expert ground truth — then exports clean coordinates for RELION/cryoSPARC.
+
+> **Honest positioning:** we do **not** claim a novel picking model or a novel ML algorithm. The contribution is the **product**: an open, interactive, real-time junk-triage platform with a live HITL learning loop and honest measurement, on a single GPU. The junk classifier is a deliberately simple, swappable baseline (RandomForest / LightGBM / CNN).
 
 ## Table of Contents
 
@@ -42,19 +43,23 @@ We use [uv](https://docs.astral.sh/uv/) for env + packaging.
 
 ```bash
 # 0. install uv once:  curl -LsSf https://astral.sh/uv/install.sh | sh
+uv sync                                   # env + deps + lock
+uv run pytest -q                          # sanity check
 
-# 1. create the env + install everything (project, deps, dev tools) and lock
-uv sync
+# --- the real-time app (FastAPI backend + React canvas frontend) ---
+uv run python backend/precompute.py --empiar 10017          # parallel cache (uses all cores)
+uv run python scripts/train_classifiers.py --empiar 10017   # RF + LightGBM junk scores
+uv run uvicorn backend.app:app --host 0.0.0.0 --port 8501   # open http://localhost:8501
 
-# 2. sanity check (tests should pass out of the box)
-uv run pytest -q          # or: make test
-
-# 3. run the UI
-uv run streamlit run app/streamlit_app.py     # or: make app
-
-# 4. eval harness (synthetic demo; works with no data)
-uv run python eval/run_eval.py --demo         # or: make eval
+# eval harness (synthetic; no data needed)
+uv run python eval/run_eval.py --demo
 ```
+
+The enterprise app (`backend/` + `frontend/`) is the primary UI: a canvas micrograph
+viewer with pan/zoom, **box-brush** bulk keep/dump HITL, a swappable junk classifier
+(RandomForest / LightGBM / CNN), a live Plotly scoreboard, WebSocket streaming, 2D class
+averages, and `.star`/`.box`/PNG/PDF export. (`app/streamlit_app.py` is a simpler
+Streamlit version kept as a fallback.)
 
 ## On the GPU box (RunPod)
 
@@ -91,29 +96,39 @@ MRC micrograph → preprocess (io_mrc) → picker (blob LoG | CryoSegNet/SAM, ca
    → 2D class averages of kept particles (class2d.py)  → montage
 ```
 
-## Junk Classifier (the novel piece)
+## Junk Classifier (swappable baseline)
 
-A lightweight scikit-learn RandomForest on 8 interpretable per-candidate features
-(mean/std/contrast/edge-density/blobiness…). Labels come from CryoPPP: a candidate
-matching a ground-truth particle = keep, otherwise = junk. Trains in seconds, updates
-instantly for the human-in-the-loop loop.
+Three interchangeable backends over the same 8 interpretable per-candidate features
+(mean/std/contrast/edge-density/blobiness…), selectable live in the UI:
 
-## Evaluation & Metrics (honest)
+- **RandomForest** (scikit-learn) — fast, but overfits in-sample.
+- **LightGBM** (gradient-boosted trees) — best honest tabular accuracy; the default.
+- **CNN** (`cnn_classifier.py`, torch on GPU) — learns features from raw 64×64 crops.
 
-On EMPIAR-10017 β-galactosidase (real CryoPPP ground truth):
+Labels come from CryoPPP: a candidate matching a ground-truth particle = keep, else junk.
+Trains/refits in well under a second, so it updates instantly for the live HITL loop.
 
-- **The problem:** the blob picker over-picks — recall ≈ 0.997 but precision ≈ 0.13
-  (~4,300 junk false-positives per micrograph), picking **F1 ≈ 0.23**.
-- **Junk classifier (held-out, micrograph-level):** junk-rejection **F1 ≈ 0.93**.
-- **After junk triage (in-sample):** picking **F1 ≈ 0.998** — *optimistic / in-sample*.
-- **After junk triage (held-out):** modest improvement at a calibrated threshold
-  (picking F1 ≈ 0.22 → ≈ 0.36); the default threshold over-rejects on unseen micrographs.
-  More training micrographs + per-dataset threshold calibration would improve this.
-- **CryoSegNet** runs on the GPU (incl. NVIDIA Blackwell via a torch-cu128 env) but
-  under-picks β-gal with default settings (recall ≈ 0.11); blob + junk-triage is the
-  stronger demo.
+## Evaluation & Metrics (honest — read this)
 
-Reproduce: `uv run python eval/heldout_eval.py --empiar 10017 --radius 54 --box 108`.
+On EMPIAR-10017 β-galactosidase (real CryoPPP ground truth), **micrograph-level held-out**:
+
+| classifier | in-sample picking F1 | **held-out** picking F1 | reading |
+|---|---|---|---|
+| RandomForest | 0.998 | **0.025** | memorizes — the "wow" number is overfitting |
+| LightGBM | 0.27 | **0.234** | honest, generalizes (the default) |
+| CNN | 0.25 | 0.248 | comparable |
+
+The blunt truth: the blob picker over-picks background that **resembles** the small,
+low-contrast β-gal particles, so the honest junk-triage gain is **modest** (raw picking
+F1 ≈ 0.22 → ≈ 0.23–0.25 held-out). No classifier fixes that — a **stronger picker**
+(Topaz) or a **distinct-junk protein** (visible ice/carbon) is the real lever. We report
+held-out numbers on purpose; in-sample numbers are optimistic.
+
+CryoSegNet runs on the GPU (incl. NVIDIA Blackwell via a torch-cu128 env) but under-picks
+β-gal with default settings (recall ≈ 0.11).
+
+Reproduce: `uv run python eval/compare_classifiers.py --empiar 10017` and
+`uv run python eval/heldout_eval.py --empiar 10017 --radius 54 --box 108`.
 
 ## Running on the GPU box
 
