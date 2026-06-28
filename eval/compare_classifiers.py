@@ -105,7 +105,7 @@ def main() -> int:
     if cs:
         datasets.append(("cryosegnet", cs))
     for pname, data in datasets:
-        for mt in ("rf", "lgbm"):
+        for mt in ("rf", "lgbm", "sgd"):
             jf, bf, af05, afb, bt = evalset(data, mt)
             print(f"RESULT picker={pname:10s} model={mt:4s}: junkF1={jf:.3f}  "
                   f"pickF1 raw={bf:.3f} -> after@0.5={af05:.3f} -> best={afb:.3f}@thr{bt:.2f}",

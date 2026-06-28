@@ -38,6 +38,7 @@ app = FastAPI(title="CryoClear")
 CLF_OPTIONS = {
     "lgbm": {"label": "LightGBM — boosted trees (robust, default)", "heldout": 0.248, "thr": 0.60},
     "rf": {"label": "RandomForest — needs high threshold or over-rejects", "heldout": 0.248, "thr": 0.85},
+    "sgd": {"label": "SGD log-loss — true online active learning (partial_fit)", "heldout": 0.243, "thr": 0.50},
     "cnn": {"label": "CNN — learned on raw 64px crops", "heldout": 0.248, "thr": 0.50},
 }
 
@@ -48,23 +49,51 @@ DATASETS = {
     "10017": {"label": "β-galactosidase · EMPIAR-10017", "diameter": 108, "has_gt": True},
     "10005": {"label": "TRPV1 ion channel · EMPIAR-10005", "diameter": 180, "has_gt": False},
     "10025": {"label": "T20S proteasome · EMPIAR-10025", "diameter": 160, "has_gt": False},
+    "10075": {"label": "EMPIAR-10075", "diameter": 108, "has_gt": True},
+    "10345": {"label": "EMPIAR-10345", "diameter": 108, "has_gt": True},
+    "10081": {"label": "EMPIAR-10081 · TMV", "diameter": 108, "has_gt": True},
+    "10093": {"label": "EMPIAR-10093", "diameter": 108, "has_gt": True},
 }
 
 
+# The full picker menu. `status: ready` = wired + cacheable on this Blackwell pod;
+# `status: planned` = registered behind the same interface but not installed (honest:
+# crYOLO/MicrographCleaner are TensorFlow with no NVIDIA sm_120 wheels; CryoFSL/cryo-EMMAE
+# are research code). A planned picker becomes selectable the moment its cache appears.
 PICKERS = {
-    "blob": "Blob LoG — fast, over-picks (default)",
-    "topaz": "Topaz — pretrained CNN detector (GPU)",
-    "cryosegnet": "CryoSegNet — SAM + attention U-Net (GPU)",
+    "blob": {"label": "Blob LoG", "device": "CPU", "speed": "instant", "framework": "scikit-image",
+             "why": "zero-deps over-picker — the guaranteed floor and the best junk-triage showcase",
+             "status": "ready"},
+    "topaz": {"label": "Topaz", "device": "GPU / CPU", "speed": "fast", "framework": "PyTorch",
+              "why": "industry standard; pretrained resnet16_u64; the only strong picker that also runs CPU-only",
+              "status": "ready"},
+    "cryosegnet": {"label": "CryoSegNet", "device": "GPU", "speed": "slow", "framework": "PyTorch",
+                   "why": "benchmark precision leader (SAM + attention-gated U-Net); cached offline",
+                   "status": "ready"},
+    "cryolo": {"label": "crYOLO", "device": "GPU", "speed": "fastest", "framework": "TensorFlow",
+               "why": "highest FPS — but TensorFlow has no NVIDIA Blackwell sm_120 wheels (pluggable, not installed)",
+               "status": "planned"},
+    "cryofsl": {"label": "CryoFSL", "device": "GPU", "speed": "medium", "framework": "PyTorch + SAM2",
+                "why": "few-shot: adapt from 5–20 of your own seed picks (research code; pluggable)",
+                "status": "planned"},
+    "cryoemmae": {"label": "cryo-EMMAE", "device": "GPU", "speed": "medium", "framework": "PyTorch",
+                  "why": "self-supervised masked autoencoder — best generalization to unseen proteins (research code; pluggable)",
+                  "status": "planned"},
 }
+
+
+def picker_menu(empiar: str) -> dict:
+    """Full picker registry annotated with per-dataset readiness (has a cache here)."""
+    out = {}
+    for k, m in PICKERS.items():
+        ready = m["status"] == "ready" and (k == "blob" or (cache_dir(empiar, k) / "index.json").exists())
+        out[k] = {**m, "ready": ready}
+    return out
 
 
 def available_pickers(empiar: str) -> list[str]:
-    """Pickers that have a precomputed cache for this dataset (blob always)."""
-    out = ["blob"]
-    for p in ("topaz", "cryosegnet"):
-        if (cache_dir(empiar, p) / "index.json").exists():
-            out.append(p)
-    return out
+    """Pickers actually selectable for this dataset (ready + cached; blob always)."""
+    return [k for k, m in picker_menu(empiar).items() if m["ready"]]
 
 
 class State:
@@ -146,7 +175,8 @@ class State:
             feats = d["feats"]
             return (np.asarray(self.learner.clf.predict_junk_proba(feats))
                     if len(feats) else np.zeros(0))
-        key = {"lgbm": "lgbm_scores", "rf": "rf_scores", "cnn": "cnn_scores"}.get(self.clf_model)
+        key = {"lgbm": "lgbm_scores", "rf": "rf_scores", "sgd": "sgd_scores",
+               "cnn": "cnn_scores"}.get(self.clf_model)
         if key and key in d:
             return d[key]
         return d["lgbm_scores"] if "lgbm_scores" in d else d["scores"]
@@ -193,23 +223,35 @@ def api_state(empiar: str | None = None):
             "corrections": s.corrections, "f1_history": s.f1_history,
             "clf_model": s.clf_model, "mode": s.mode,
             "clf_options": CLF_OPTIONS,
-            "picker": s.picker, "pickers": available_pickers(s.empiar), "picker_labels": PICKERS,
+            "picker": s.picker, "pickers": available_pickers(s.empiar), "picker_menu": picker_menu(s.empiar),
             "micrographs": s.index["micrographs"]}
 
 
 @app.get("/api/datasets")
 def api_datasets():
-    """List preloaded datasets and whether each has a precomputed cache."""
+    """List preloaded datasets, whether each has a precomputed cache, and (from the
+    cache) whether it carries CryoPPP ground truth (→ full precision/recall metrics)."""
     out = []
     for empiar, meta in DATASETS.items():
-        ready = (cache_dir(empiar) / "index.json").exists()
-        out.append({"empiar": empiar, "ready": ready, **meta})
+        idx_path = cache_dir(empiar) / "index.json"
+        ready = idx_path.exists()
+        has_gt = meta["has_gt"]
+        if ready:
+            try:
+                mics = json.loads(idx_path.read_text())["micrographs"]
+                has_gt = any(m.get("n_gt", 0) > 0 for m in mics)
+            except Exception:
+                pass
+        out.append({"empiar": empiar, "ready": ready, **meta, "has_gt": has_gt})
     return {"datasets": out}
 
 
 @app.get("/api/img/{empiar}/{stem}.png")
 def api_img(empiar: str, stem: str):
-    return FileResponse(get_state(empiar).cache / "img" / f"{stem}.png")
+    # micrograph PNG is immutable per (empiar, stem) → let the browser hard-cache it so
+    # navigation between already-seen frames is instant (zero-lag).
+    return FileResponse(get_state(empiar).cache / "img" / f"{stem}.png",
+                        headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/api/picks/{empiar}/{stem}")

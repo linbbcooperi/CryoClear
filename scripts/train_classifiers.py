@@ -40,14 +40,16 @@ def main() -> int:
     y = np.concatenate(ys).astype(int) if ys else np.zeros(0, int)
     labelled = len(y) and len(np.unique(y)) > 1
 
+    backends = ("rf", "lgbm", "sgd")
     if args.score_from:                                   # no training — reuse another dataset's models
         src = config.PROCESSED / args.score_from
-        models = {mt: JunkClassifier.load(src / f"junk_{mt}.joblib") for mt in ("rf", "lgbm")}
-        print(f"scoring {args.empiar} with {args.score_from}'s rf + lgbm models (no GT)", flush=True)
+        models = {mt: JunkClassifier.load(src / f"junk_{mt}.joblib") for mt in backends
+                  if (src / f"junk_{mt}.joblib").exists()}
+        print(f"scoring {args.empiar} with {args.score_from}'s {list(models)} models (no GT)", flush=True)
     elif labelled:
         X = np.vstack(Xs)
         print(f"training on {len(X)} labelled candidates ({y.mean():.2f} junk)", flush=True)
-        models = {mt: JunkClassifier(model_type=mt).fit(X, y) for mt in ("rf", "lgbm")}
+        models = {mt: JunkClassifier(model_type=mt).fit(X, y) for mt in backends}
         for mt, clf in models.items():
             clf.save(config.PROCESSED / args.empiar / f"junk_{mt}.joblib")
         print("fitted rf + lgbm; caching scores…", flush=True)

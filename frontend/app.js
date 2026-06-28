@@ -192,6 +192,17 @@ function App() {
     G(`/api/metrics/${empiar}/${stem}`).then(setMet);
   }, [empiar, stem, picker]);
   useEffect(() => { load(); }, [load]);
+  // prefetch adjacent micrographs (image + picks) so prev/next is lag-free
+  useEffect(() => {
+    if (!info || !empiar) return;
+    [idx - 1, idx + 1, idx + 2].forEach(j => {
+      if (j >= 0 && j < info.micrographs.length) {
+        const st = info.micrographs[j].stem;
+        const im = new Image(); im.src = `/api/img/${empiar}/${st}.png`;
+        G(`/api/picks/${empiar}/${st}`);
+      }
+    });
+  }, [idx, empiar, info, picker]);
 
   const onCorrect = (sel, b) => {
     const body = { empiar, stem, dump_idx: b === 'keep' ? [] : sel, keep_idx: b === 'keep' ? sel : [] };
@@ -363,12 +374,11 @@ function App() {
         <div class="group">
           <h4>Picker</h4>
           <select value=${picker} onChange=${e => switchPicker(e.target.value)}>
-            ${(info.pickers || ['blob']).map(p =>
-              html`<option key=${p} value=${p}>${(info.picker_labels && info.picker_labels[p]) || p}</option>`)}
+            ${Object.entries(info.picker_menu || { blob: { label: 'Blob LoG', device: 'CPU', ready: true } }).map(([k, m]) =>
+              html`<option key=${k} value=${k} disabled=${!m.ready}>${m.label} · ${m.device}${m.ready ? '' : ' · pluggable'}</option>`)}
           </select>
-          <div class="note">${(info.pickers || []).length > 1
-            ? 'Switch the candidate picker live — Topaz & CryoSegNet are real pretrained GPU pickers (cached). The classifier then triages whichever picker you pick.'
-            : 'Only the blob picker is precomputed for this dataset.'}</div>
+          <div class="note">${(info.picker_menu && info.picker_menu[picker] && info.picker_menu[picker].why)
+            || 'Switch the candidate picker live; the junk classifier triages whichever you pick.'}</div>
         </div>
 
         <div class="divider"></div>

@@ -15,9 +15,12 @@ import numpy as np
 class JunkClassifier:
     """Binary junk classifier (JUNK=1 / particle=0) over per-candidate features.
 
-    Two backends: ``rf`` (scikit-learn RandomForest) and ``lgbm`` (LightGBM gradient-
-    boosted trees — best tabular accuracy, captures the nonlinear ice/carbon/aggregate
-    signatures, refits in well under a second). Same API for both.
+    Three backends, same API:
+      - ``rf``   scikit-learn RandomForest — zero-tuning, robust.
+      - ``lgbm`` LightGBM gradient-boosted trees — best honest tabular accuracy (default);
+                 captures the nonlinear ice/carbon/aggregate signatures.
+      - ``sgd``  StandardScaler + SGDClassifier(log_loss) — purest active learning: true
+                 incremental ``partial_fit`` updates (ms) + a linear, interpretable boundary.
     """
 
     def __init__(self, model_type: str = "rf", n_estimators: int = 400,
@@ -35,6 +38,20 @@ class JunkClassifier:
                 colsample_bytree=0.8, reg_lambda=1.0, class_weight="balanced",
                 n_jobs=-1, random_state=random_state, verbosity=-1,
             )
+        elif model_type == "sgd":
+            from sklearn.linear_model import SGDClassifier
+            from sklearn.pipeline import Pipeline
+            from sklearn.preprocessing import StandardScaler
+
+            # log_loss → calibrated probabilities; scaling is essential for SGD since the
+            # raw features span very different magnitudes. partial_fit (see update) gives
+            # true online learning for the human-in-the-loop loop.
+            self.model = Pipeline([
+                ("scaler", StandardScaler()),
+                ("sgd", SGDClassifier(loss="log_loss", penalty="l2", alpha=1e-4,
+                                      class_weight="balanced", max_iter=1000, tol=1e-3,
+                                      random_state=random_state)),
+            ])
         else:
             from sklearn.ensemble import RandomForestClassifier
 
@@ -66,12 +83,19 @@ class JunkClassifier:
         return self.predict_junk_proba(features) >= threshold
 
     def update(self, features: np.ndarray, is_junk: Sequence) -> "JunkClassifier":
-        """Active-learning refit incorporating new user-labeled corrections.
+        """Active-learning update from new user-labeled corrections.
 
-        For a hackathon the simplest robust approach is to append the new labels
-        to the running training set and refit (RandomForest fits in seconds).
-        active_learning.py owns the running buffer.
+        For ``sgd`` this is a true incremental ``partial_fit`` (no full retrain) once the
+        model has been seeded — the smoothest "watch it learn" online update. For rf/lgbm
+        we append to the running set and refit (active_learning.py owns the buffer); both
+        fit in well under a second.
         """
+        if self.model_type == "sgd" and self._fitted:
+            X = np.asarray(features, dtype=float)
+            y = np.asarray(is_junk).astype(int)
+            scaler = self.model.named_steps["scaler"]
+            self.model.named_steps["sgd"].partial_fit(scaler.transform(X), y)
+            return self
         return self.fit(features, is_junk)
 
     def save(self, path: str | Path) -> None:
