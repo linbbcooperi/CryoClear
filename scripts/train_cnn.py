@@ -56,13 +56,37 @@ def main() -> int:
     ap.add_argument("--empiar", default=config.DEMO_EMPIAR_ID)
     ap.add_argument("--epochs", type=int, default=10)
     ap.add_argument("--test-frac", type=float, default=0.3)
+    ap.add_argument("--score-from", default=None,
+                    help="EMPIAR id whose trained CNN (junk_cnn.pt) to apply (cross-protein, "
+                         "no training — used to give every dataset cnn_scores)")
+    ap.add_argument("--picker", default="blob", help="which webcache to score")
     args = ap.parse_args()
 
     from cryoclear.cnn_classifier import CNNJunkClassifier
 
-    cache = config.PROCESSED / args.empiar / "webcache"
+    cache = config.PROCESSED / args.empiar / ("webcache" if args.picker == "blob"
+                                              else f"webcache_{args.picker}")
     idx = json.loads((cache / "index.json").read_text())
     mics = idx["micrographs"]
+
+    if args.score_from:                               # cross-apply an existing CNN, cache scores only
+        model_path = config.PROCESSED / args.score_from / "junk_cnn.pt"
+        clf = CNNJunkClassifier.load(model_path)
+        n = 0
+        for m in mics:
+            stem = m["stem"]
+            d = dict(np.load(cache / "data" / f"{stem}.npz"))
+            mic = config.RAW / args.empiar / "micrographs" / f"{stem}.mrc"
+            crops, valid = crops_for(mic, d["pred_full"])
+            full = np.ones(len(d["pred_full"]), np.float32)
+            if len(crops):
+                full[valid] = clf.predict_junk_proba(crops).astype(np.float32)
+            d["cnn_scores"] = full
+            np.savez_compressed(cache / "data" / f"{stem}.npz", **d)
+            n += 1
+        print(f"cross-applied {args.score_from}'s CNN -> cached cnn_scores for {n} micrographs "
+              f"of {args.empiar} ({args.picker})", flush=True)
+        return 0
 
     data = {}
     for m in mics:

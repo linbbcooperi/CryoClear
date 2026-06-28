@@ -16,6 +16,7 @@ class ActiveLearner:
         self.clf = classifier or JunkClassifier()
         self._X: list[np.ndarray] = []
         self._y: list[int] = []
+        self._batches: list[int] = []   # size of each add_corrections call (for undo)
 
     def seed(self, features: np.ndarray, is_junk) -> "ActiveLearner":
         """Initialize the buffer with the pre-trained set (e.g. CryoPPP labels)."""
@@ -33,11 +34,28 @@ class ActiveLearner:
         "watch it learn" loop stays lag-free without the single-class ``partial_fit`` pitfall
         (balanced class weights can't be computed from an all-junk correction batch).
         """
+        n0 = len(self._y)
         for f, j in zip(np.asarray(features, dtype=float), np.asarray(is_junk).astype(int)):
             self._X.append(f)
             self._y.append(int(j))
+        self._batches.append(len(self._y) - n0)
         self._refit()
         return {"n_labels": len(self._y), "n_junk": int(sum(self._y))}
+
+    def undo_last(self):
+        """Remove the most recent correction batch and refit. Returns the removed
+        (features, labels) for redo, or None if there is nothing to undo (the seed
+        is never popped, so both classes always remain)."""
+        if not self._batches:
+            return None
+        n = self._batches.pop()
+        X = np.array(self._X[-n:]) if n else np.zeros((0, 0))
+        y = np.array(self._y[-n:]) if n else np.zeros(0, int)
+        if n:
+            del self._X[-n:]
+            del self._y[-n:]
+        self._refit()
+        return X, y
 
     def _refit(self) -> None:
         if len(set(self._y)) < 2:

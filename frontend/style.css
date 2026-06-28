@@ -47,6 +47,9 @@ canvas { position: absolute; top: 0; left: 0; border: 1px solid var(--border);
 .zoomctl button { width: 32px; height: 30px; padding: 0; font-size: 15px;
   background: rgba(18,24,34,.92); }
 .zoomctl button:last-child { width: auto; padding: 0 11px; font-size: 12px; }
+.uprog { width: 100px; height: 6px; background: var(--panel2); border: 1px solid var(--border);
+  border-radius: 4px; overflow: hidden; }
+.upbar { height: 100%; background: var(--primary); transition: width .12s ease; }
 .legend { display: flex; gap: 16px; padding: 7px 14px; font-size: 12px; color: var(--muted);
   border-top: 1px solid var(--border); background: var(--panel); }
 .legend .sw { width: 11px; height: 11px; border-radius: 2px; display: inline-block;

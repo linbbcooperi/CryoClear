@@ -85,7 +85,9 @@ function Viewer({ empiar, stem, picks, factor, brush, tool, onCorrect }) {
   useEffect(() => {
     const w = wrapRef.current; if (!w) return;
     const onWheel = (e) => { e.preventDefault(); const r = w.getBoundingClientRect();
-      zoomAt(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.15 : 1 / 1.15); };
+      // proportional + clamped so wheels/trackpads zoom smoothly instead of jumping
+      const fac = Math.min(1.25, Math.max(0.8, Math.exp(-e.deltaY * 0.0012)));
+      zoomAt(e.clientX - r.left, e.clientY - r.top, fac); };
     w.addEventListener('wheel', onWheel, { passive: false });
     return () => w.removeEventListener('wheel', onWheel);
   }, []);
@@ -176,6 +178,8 @@ function App() {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadPct, setUploadPct] = useState(0);
+  const [uploadMsg, setUploadMsg] = useState('');
   const [datasets, setDatasets] = useState([]);
   const [selEmpiar, setSelEmpiar] = useState(null);
   const [f1hist, setF1] = useState([]);
@@ -233,6 +237,7 @@ function App() {
     if (!r) return;
     setCanUndo(!!r.can_undo); setCanRedo(!!r.can_redo);
     if (!r.ok) return;
+    if (r.f1_history) setF1(r.f1_history);
     if (r.stem !== stem && info) {                 // correction was on another micrograph → jump there
       const j = info.micrographs.findIndex(m => m.stem === r.stem);
       if (j >= 0) setIdx(j);
@@ -241,17 +246,29 @@ function App() {
       G(`/api/metrics/${empiar}/${stem}`).then(setMet);
     }
   };
-  const undo = () => J('/api/undo', { empiar }).then(applyUndoRedo);
-  const redo = () => J('/api/redo', { empiar }).then(applyUndoRedo);
+  const undo = () => J('/api/undo', { empiar, stem }).then(applyUndoRedo);
+  const redo = () => J('/api/redo', { empiar, stem }).then(applyUndoRedo);
   const uploadMrc = (files) => {
     const f = files && files[0]; if (!f) return;
-    setUploading(true);
-    fetch(`/api/upload?empiar=${empiar}&filename=${encodeURIComponent(f.name)}`, { method: 'POST', body: f })
-      .then(r => r.json()).then(r => {
-        setUploading(false);
-        if (!r.ok) { alert('Upload failed: ' + (r.error || 'unknown')); return; }
-        G(`/api/state?empiar=${empiar}`).then(s => { setInfo(s); const j = s.micrographs.findIndex(m => m.stem === r.stem); if (j >= 0) setIdx(j); });
-      }).catch(e => { setUploading(false); alert('Upload error: ' + e); });
+    setUploading(true); setUploadPct(0); setUploadMsg('');
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `/api/upload?empiar=${empiar}&filename=${encodeURIComponent(f.name)}`);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) setUploadPct(Math.round(100 * e.loaded / e.total)); };
+    xhr.onload = () => {
+      setUploading(false); setUploadPct(0);
+      let r = {}; try { r = JSON.parse(xhr.responseText); } catch (_) { /* */ }
+      if (!r.ok) { alert('Upload failed: ' + (r.error || ('HTTP ' + xhr.status))); return; }
+      setUploadMsg(`uploaded ${r.stem} · ${r.n_picks} picks`);
+      G(`/api/state?empiar=${empiar}`).then(s => { setInfo(s); const j = s.micrographs.findIndex(m => m.stem === r.stem); if (j >= 0) setIdx(j); });
+    };
+    xhr.onerror = () => { setUploading(false); setUploadPct(0); alert('Upload error'); };
+    xhr.send(f);
+  };
+  const clearUploads = () => {
+    J('/api/upload/clear', { empiar }).then(() => {
+      setUploadMsg('');
+      G(`/api/state?empiar=${empiar}`).then(s => { setInfo(s); setIdx(0); });
+    });
   };
 
   const changeTh = (t) => { setTh(t); J('/api/threshold', { empiar, threshold: t }).then(() => load()); };
@@ -327,14 +344,18 @@ function App() {
           <button class="sm" onClick=${() => setIdx(i => Math.max(0, i - 1))}>◀ prev</button>
           <select value=${stem} onChange=${e => setIdx(info.micrographs.findIndex(m => m.stem === e.target.value))}
              style=${{ width: '230px' }}>
-            ${info.micrographs.map((m, i) => html`<option key=${m.stem} value=${m.stem}>${i + 1}. ${m.stem}</option>`)}
+            ${info.micrographs.map((m, i) => html`<option key=${m.stem} value=${m.stem}>${i + 1}. ${m.stem}${m.uploaded ? '  (uploaded)' : ''}</option>`)}
           </select>
           <button class="sm" onClick=${() => setIdx(i => Math.min(info.micrographs.length - 1, i + 1))}>next ▶</button>
-          <label class=${'sm' + (uploading ? ' primary' : '')} style=${{ cursor: 'pointer' }}
+          ${info.micrographs.some(m => m.uploaded)
+      ? html`<button class="sm junk" onClick=${clearUploads} title="Remove uploaded micrographs">clear uploads</button>`
+      : html`<label class=${'sm' + (uploading ? ' primary' : '')} style=${{ cursor: 'pointer' }}
              title="Pick + junk-triage your own micrograph (no ground truth)">
-            ${uploading ? 'uploading…' : 'upload MRC'}
+            ${uploading ? `uploading ${uploadPct}%` : 'upload MRC'}
             <input type="file" accept=".mrc" style=${{ display: 'none' }} onChange=${e => uploadMrc(e.target.files)} />
-          </label>
+          </label>`}
+          ${uploading ? html`<div class="uprog"><div class="upbar" style=${{ width: uploadPct + '%' }}></div></div>` : ''}
+          ${uploadMsg ? html`<span class="lbl" style=${{ color: 'var(--keep)' }}>${uploadMsg}</span>` : ''}
           <div style=${{ width: '12px' }}></div>
           <span class="lbl">brush:</span>
           <button class=${'sm junk' + (brush === 'junk' ? ' active' : '')} onClick=${() => setBrush('junk')}>dump <span class="kbd">d</span></button>

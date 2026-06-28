@@ -317,11 +317,13 @@ async def api_correct(payload: dict):
     feats = s.npz(stem)["feats"]
     dump = [int(i) for i in payload.get("dump_idx", []) if 0 <= int(i) < len(feats)]
     keep = [int(i) for i in payload.get("keep_idx", []) if 0 <= int(i) < len(feats)]
-    if s.mode == "learn":   # corrections retrain the live model (the climb demo)
-        if dump:
-            s.learner.add_corrections(feats[dump], np.ones(len(dump), int))
-        if keep:
-            s.learner.add_corrections(feats[keep], np.zeros(len(keep), int))
+    if s.mode == "learn":   # corrections retrain the live model (the climb demo) — undoable
+        idxs = dump + keep
+        labels = np.array([1] * len(dump) + [0] * len(keep), int)
+        if len(idxs):
+            s.learner.add_corrections(feats[idxs], labels)   # one batch per correction → clean undo
+            s.undo_stack.append({"learn": True, "stem": stem})
+            s.redo_stack.clear()
     else:                   # model mode: manual per-particle overrides (instant, undoable)
         ov = s.overrides.setdefault(stem, {})
         prev = {i: ov.get(i) for i in (*dump, *keep)}   # prior label (None = unset) for undo
@@ -365,14 +367,31 @@ def _undo_redo_result(s: "State", stem: str) -> dict:
             "can_undo": bool(s.undo_stack), "can_redo": bool(s.redo_stack)}
 
 
+def _learn_f1(s: "State", stem: str) -> None:
+    d = s.npz(stem)
+    if (d["true_junk"] != -1).any():
+        jr = metrics.junk_rejection_metrics(s.junk_mask(stem), d["true_junk"] == 1)
+        s.f1_history.append(jr["junk_f1"])
+
+
 @app.post("/api/undo")
 def api_undo(payload: dict):
     s = get_state(payload.get("empiar"))
     if not s.undo_stack:
         return {"ok": False, "can_undo": False, "can_redo": bool(s.redo_stack)}
     rec = s.undo_stack.pop()
-    s.redo_stack.append(_swap_overrides(s, rec))
-    return {"ok": True, **_undo_redo_result(s, rec["stem"])}
+    cur = payload.get("stem") or rec.get("stem")
+    if rec.get("learn"):                       # active-learning undo: pop the last taught batch
+        removed = s.learner.undo_last()
+        s.redo_stack.append({"learn": True, "stem": rec["stem"],
+                             "X": (removed[0] if removed is not None else None),
+                             "y": (removed[1] if removed is not None else None)})
+        if s.f1_history:
+            s.f1_history.pop()
+        s.corrections = max(0, s.corrections - (len(removed[1]) if removed is not None else 0))
+    else:
+        s.redo_stack.append(_swap_overrides(s, rec))
+    return {"ok": True, "f1_history": s.f1_history, **_undo_redo_result(s, cur)}
 
 
 @app.post("/api/redo")
@@ -381,8 +400,16 @@ def api_redo(payload: dict):
     if not s.redo_stack:
         return {"ok": False, "can_undo": bool(s.undo_stack), "can_redo": False}
     rec = s.redo_stack.pop()
-    s.undo_stack.append(_swap_overrides(s, rec))
-    return {"ok": True, **_undo_redo_result(s, rec["stem"])}
+    cur = payload.get("stem") or rec.get("stem")
+    if rec.get("learn"):                       # re-teach the batch that was undone
+        if rec.get("X") is not None and len(rec["y"]):
+            s.learner.add_corrections(rec["X"], rec["y"])
+            s.corrections += len(rec["y"])
+        s.undo_stack.append({"learn": True, "stem": rec["stem"]})
+        _learn_f1(s, rec["stem"])
+    else:
+        s.undo_stack.append(_swap_overrides(s, rec))
+    return {"ok": True, "f1_history": s.f1_history, **_undo_redo_result(s, cur)}
 
 
 @app.post("/api/threshold")
@@ -430,7 +457,7 @@ async def api_upload(request: Request, empiar: str = config.DEMO_EMPIAR_ID,
         pred_disp=pred_disp.astype(np.float32), pred_full=pred_full.astype(np.float32),
         scores=np.zeros(len(pred_full), np.float32),
         true_junk=np.full(len(pred_full), -1, np.int8), feats=feats.astype(np.float32))
-    for mt in ("rf", "lgbm"):
+    for mt in ("rf", "lgbm", "sgd"):       # CPU classifiers all score the upload; CNN (GPU) falls back to lgbm
         mp = config.PROCESSED / empiar / f"junk_{mt}.joblib"
         if mp.exists() and len(feats):
             try:
@@ -446,6 +473,24 @@ async def api_upload(request: Request, empiar: str = config.DEMO_EMPIAR_ID,
     (s.cache / "index.json").write_text(json.dumps(s.index, indent=2))
     s._npz.pop(stem, None)
     return {"ok": True, "stem": stem, "n_picks": int(len(pred_full))}
+
+
+@app.post("/api/upload/clear")
+def api_upload_clear(payload: dict):
+    """Remove all uploaded micrographs for this dataset (the 'clear' button)."""
+    s = get_state(payload.get("empiar"))
+    ups = [m["stem"] for m in s.index["micrographs"] if m.get("uploaded")]
+    s.index["micrographs"] = [m for m in s.index["micrographs"] if not m.get("uploaded")]
+    (s.cache / "index.json").write_text(json.dumps(s.index, indent=2))
+    for st in ups:
+        s._npz.pop(st, None)
+        for p in (s.cache / "data" / f"{st}.npz", s.cache / "img" / f"{st}.png",
+                  config.RAW / s.empiar / "uploads" / f"{st}.mrc"):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+    return {"ok": True, "cleared": ups, "n_micrographs": len(s.index["micrographs"])}
 
 
 @app.post("/api/reset")
