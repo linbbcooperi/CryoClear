@@ -154,6 +154,7 @@ function App() {
   const [threshold, setTh] = useState(0.5);
   const [mode, setMode] = useState('model');
   const [clfModel, setClf] = useState('lgbm');
+  const [picker, setPicker] = useState('blob');
   const [brush, setBrush] = useState('junk');
   const [tool, setTool] = useState('select');
   const [canUndo, setCanUndo] = useState(false);
@@ -182,14 +183,14 @@ function App() {
   useEffect(() => {
     if (!selEmpiar) return;
     setInfo(null); setPicks(null); setMet(null); setIdx(0); setF1([]); setClasses(null);
-    G(`/api/state?empiar=${selEmpiar}`).then(s => { setInfo(s); setTh(s.threshold); setClf(s.clf_model); });
+    G(`/api/state?empiar=${selEmpiar}`).then(s => { setInfo(s); setTh(s.threshold); setClf(s.clf_model); setPicker(s.picker || 'blob'); });
   }, [selEmpiar]);
 
   const load = useCallback(() => {
     if (!empiar || !stem) return;
     G(`/api/picks/${empiar}/${stem}`).then(setPicks);
     G(`/api/metrics/${empiar}/${stem}`).then(setMet);
-  }, [empiar, stem]);
+  }, [empiar, stem, picker]);
   useEffect(() => { load(); }, [load]);
 
   const onCorrect = (sel, b) => {
@@ -229,6 +230,13 @@ function App() {
   const changeTh = (t) => { setTh(t); J('/api/threshold', { empiar, threshold: t }).then(() => load()); };
   const switchMode = (m) => { setMode(m); J('/api/mode', { empiar, mode: m }).then(() => { setF1([]); load(); }); };
   const switchClf = (m) => { setClf(m); J('/api/clf_model', { empiar, clf_model: m }).then(r => { if (r && r.threshold != null) setTh(r.threshold); load(); }); };
+  const switchPicker = (p) => {
+    J('/api/picker', { empiar, picker: p }).then(r => {
+      if (!r || !r.ok) { alert('Picker not available for this dataset'); return; }
+      setPicker(p); setIdx(0); setPicks(null); setMet(null); setF1([]);
+      G(`/api/state?empiar=${empiar}`).then(setInfo);
+    });
+  };
   const reset = () => { J('/api/reset', { empiar, coldstart: mode === 'learn' }).then(() => { setF1([]); setCanUndo(false); setCanRedo(false); load(); }); };
   const run2d = () => { setBusy2d(true); J('/api/classify2d', { empiar }).then(r => { setClasses(r); setBusy2d(false); }); };
   const savePng = (type) => {
@@ -349,6 +357,18 @@ function App() {
           <div class="row between"><span class="lbl">keep if junk-prob &lt; ${threshold.toFixed(2)}</span></div>
           <input type="range" min="0.1" max="0.95" step="0.05" value=${threshold}
              onChange=${e => changeTh(parseFloat(e.target.value))} />
+        </div>
+
+        <div class="divider"></div>
+        <div class="group">
+          <h4>Picker</h4>
+          <select value=${picker} onChange=${e => switchPicker(e.target.value)}>
+            ${(info.pickers || ['blob']).map(p =>
+              html`<option key=${p} value=${p}>${(info.picker_labels && info.picker_labels[p]) || p}</option>`)}
+          </select>
+          <div class="note">${(info.pickers || []).length > 1
+            ? 'Switch the candidate picker live — Topaz & CryoSegNet are real pretrained GPU pickers (cached). The classifier then triages whichever picker you pick.'
+            : 'Only the blob picker is precomputed for this dataset.'}</div>
         </div>
 
         <div class="divider"></div>

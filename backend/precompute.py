@@ -23,8 +23,8 @@ from cryoclear import config  # noqa: E402
 _CLF = None  # per-worker model
 
 
-def cache_dir(empiar: str) -> Path:
-    return config.PROCESSED / empiar / "webcache"
+def cache_dir(empiar: str, picker: str = "blob") -> Path:
+    return config.PROCESSED / empiar / ("webcache" if picker == "blob" else f"webcache_{picker}")
 
 
 def _init_worker(model_path: str):
@@ -50,8 +50,14 @@ def _process_one(task: dict) -> dict:
     img = io_mrc.load_for_pipeline(mic, factor=factor)              # downsampled 8-bit
     mpimg.imsave(out / "img" / f"{mic.stem}.png", img, cmap="gray", vmin=0, vmax=255)
 
-    pred_disp = picker.pick(img, backend="blob")
-    pred_full = pred_disp * float(factor)
+    if task.get("picker", "blob") == "blob":
+        pred_disp = picker.pick(img, backend="blob")
+        pred_full = pred_disp * float(factor)
+    else:                                   # cached picks from another picker (topaz / cryosegnet)
+        star = Path(task["picks_dir"]) / f"{mic.stem}.star"
+        pred_full = (coords.read_star_coords(star) if star.exists()
+                     else np.zeros((0, 2), dtype=float))
+        pred_disp = pred_full / float(factor)
     feats = features.extract_features(imgf, pred_full, box=box)
     try:
         scores = (_CLF.predict_junk_proba(feats) if (_CLF is not None and len(feats))
@@ -93,17 +99,21 @@ def _process_one(task: dict) -> dict:
 
 
 def precompute(empiar: str, factor: int = 4, box: int | None = None,
-               radius: float | None = None, workers: int | None = None) -> dict:
+               radius: float | None = None, workers: int | None = None,
+               picker: str = "blob", picks_dir: str | None = None) -> dict:
     box = box or config.DEMO_PARTICLE_DIAMETER_PX
     radius = radius or config.particle_radius_px()
     raw = config.RAW / empiar
     mics = sorted((raw / "micrographs").glob("*.mrc"))
     gts = {g.stem: g for g in (raw / "ground_truth").glob("*.star")}
-    out = cache_dir(empiar)
+    out = cache_dir(empiar, picker)
     model = config.PROCESSED / empiar / "junk_classifier.joblib"
+    if picker != "blob" and not picks_dir:
+        picks_dir = str(config.PROCESSED / empiar / picker)   # e.g. .../topaz, .../cryosegnet
 
     tasks = [{"mic": str(m), "gt": str(gts.get(m.stem, "")) or "",
-              "factor": factor, "box": box, "radius": radius, "out": str(out)}
+              "factor": factor, "box": box, "radius": radius, "out": str(out),
+              "picker": picker, "picks_dir": picks_dir or ""}
              for m in mics]
     import os
     workers = workers or min(len(tasks), max(1, (os.cpu_count() or 8) - 2))
@@ -114,7 +124,7 @@ def precompute(empiar: str, factor: int = 4, box: int | None = None,
             results.append(r)
 
     index = {"empiar": empiar, "factor": factor, "box": box, "radius": radius,
-             "micrographs": results}
+             "picker": picker, "micrographs": results}
     (out).mkdir(parents=True, exist_ok=True)
     (out / "index.json").write_text(json.dumps(index, indent=2))
     return index
@@ -127,9 +137,11 @@ def main() -> int:
     ap.add_argument("--box", type=int, default=None, help="particle box in full-res px (per dataset)")
     ap.add_argument("--radius", type=float, default=None, help="GT match radius in full-res px")
     ap.add_argument("--workers", type=int, default=None)
+    ap.add_argument("--picker", default="blob", help="blob | topaz | cryosegnet (cached .star)")
+    ap.add_argument("--picks-dir", default=None, help="dir of <stem>.star picks (non-blob picker)")
     args = ap.parse_args()
-    idx = precompute(args.empiar, factor=args.factor, box=args.box,
-                     radius=args.radius, workers=args.workers)
+    idx = precompute(args.empiar, factor=args.factor, box=args.box, radius=args.radius,
+                     workers=args.workers, picker=args.picker, picks_dir=args.picks_dir)
     print(f"cached {len(idx['micrographs'])} micrographs -> {cache_dir(args.empiar)}")
     return 0
 

@@ -25,8 +25,10 @@ def main() -> int:
     ap.add_argument("--score-from", default=None,
                     help="EMPIAR id whose trained rf/lgbm models to apply (for a dataset "
                          "with no ground-truth labels — a cross-protein generalisation demo)")
+    ap.add_argument("--picker", default="blob", help="which webcache to score (blob|topaz|cryosegnet)")
     args = ap.parse_args()
-    cache = config.PROCESSED / args.empiar / "webcache"
+    cache = config.PROCESSED / args.empiar / ("webcache" if args.picker == "blob"
+                                              else f"webcache_{args.picker}")
     idx = json.loads((cache / "index.json").read_text())
 
     Xs, ys = [], []

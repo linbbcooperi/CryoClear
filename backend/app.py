@@ -51,10 +51,27 @@ DATASETS = {
 }
 
 
+PICKERS = {
+    "blob": "Blob LoG — fast, over-picks (default)",
+    "topaz": "Topaz — pretrained CNN detector (GPU)",
+    "cryosegnet": "CryoSegNet — SAM + attention U-Net (GPU)",
+}
+
+
+def available_pickers(empiar: str) -> list[str]:
+    """Pickers that have a precomputed cache for this dataset (blob always)."""
+    out = ["blob"]
+    for p in ("topaz", "cryosegnet"):
+        if (cache_dir(empiar, p) / "index.json").exists():
+            out.append(p)
+    return out
+
+
 class State:
     def __init__(self, empiar: str):
         self.empiar = empiar
-        self.cache = cache_dir(empiar)
+        self.picker = "blob"
+        self.cache = cache_dir(empiar, self.picker)
         idx_path = self.cache / "index.json"
         if not idx_path.exists():
             precompute(empiar)
@@ -74,6 +91,23 @@ class State:
         self.f1_history: list[float] = []
         self.seen: list[str] = []         # streamed micrograph order (cumulative metrics)
         self._seed_learner(coldstart=True)  # fast cold seed; only used in 'learn' mode
+
+    def set_picker(self, picker: str) -> bool:
+        """Switch the active picker by pointing at its precomputed cache; clears
+        per-picker derived state (overrides/history/npz). Blob is always available."""
+        cand = cache_dir(self.empiar, picker)
+        if not (cand / "index.json").exists():
+            return False
+        self.picker = picker
+        self.cache = cand
+        self.index = json.loads((cand / "index.json").read_text())
+        self.factor, self.radius = self.index["factor"], self.index["radius"]
+        self._npz = {}
+        self.overrides = {}
+        self.undo_stack.clear()
+        self.redo_stack.clear()
+        self.corrections = 0
+        return True
 
     # ---- model / learner ----
     def _train_table(self):
@@ -159,6 +193,7 @@ def api_state(empiar: str | None = None):
             "corrections": s.corrections, "f1_history": s.f1_history,
             "clf_model": s.clf_model, "mode": s.mode,
             "clf_options": CLF_OPTIONS,
+            "picker": s.picker, "pickers": available_pickers(s.empiar), "picker_labels": PICKERS,
             "micrographs": s.index["micrographs"]}
 
 
@@ -197,6 +232,13 @@ def api_mode(payload: dict):
         s.undo_stack.clear()
         s.redo_stack.clear()
     return {"mode": s.mode}
+
+
+@app.post("/api/picker")
+def api_picker(payload: dict):
+    s = get_state(payload.get("empiar"))
+    ok = s.set_picker(payload.get("picker", "blob"))
+    return {"ok": ok, "picker": s.picker, "n_micrographs": len(s.index["micrographs"])}
 
 
 @app.post("/api/clf_model")
