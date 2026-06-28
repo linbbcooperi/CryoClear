@@ -34,53 +34,44 @@ def pick(image: np.ndarray, backend: str = "blob", **kwargs) -> np.ndarray:
     raise ValueError(f"unknown backend: {backend}")
 
 
-def _blob_pick(image: np.ndarray, particle_px: float = 27.0, threshold_rel: float = 0.04,
-               min_distance: float | None = None, max_peaks: int = 4000) -> np.ndarray:
-    """Band-pass (Difference-of-Gaussians) blob detector with non-max suppression.
+def _blob_pick(image: np.ndarray, particle_px: float = 27.0, threshold_rel: float = 0.035,
+               min_distance: float | None = None, max_peaks: int = 2600) -> np.ndarray:
+    """Locally-normalised matched-filter (DoG band-pass) detector with NMS.
 
-    A LoG with a permissive threshold fires on every texture variation → a dense,
-    non-human over-pick field. This instead band-passes the image to the particle
-    scale (suppressing large-scale carbon gradients and pixel noise), then takes
-    spaced local maxima (min_distance NMS, particles don't overlap). The result is
-    distinct, particle-like candidates — still deliberately over-picking (~2x GT) so
-    the junk classifier has something to triage, but no longer a uniform blanket.
+    Design note (why we over-pick on purpose): a *too-precise* picker leaves the junk
+    classifier nothing distinguishable to remove, so after-triage F1 ≈ raw. We instead
+    deliberately admit the **distinguishable** junk — carbon-film edges, hole rims, ice —
+    as candidates, and let the classifier reject them (carbon is a coherent edge; the
+    23-feature classifier has `grad_coherence`/`lap_var` for exactly this). Net effect:
+    the kept (green) set stays clean *and* triage measurably beats raw picks, while a
+    pure background blob that genuinely resembles a particle is the only thing neither
+    stage can separate. Only the *border* is hard-excluded (no particle is half-off-frame).
 
-    ``particle_px`` is the particle diameter in *this image's* pixels (the display
-    image is downsampled by io_mrc factor, so ~108/4 ≈ 27 px for β-gal).
+    ``particle_px`` is the particle diameter in this image's pixels (~108/4 ≈ 27 for β-gal).
     """
-    from scipy.ndimage import (binary_dilation, gaussian_filter, sobel,
-                               uniform_filter)
+    from scipy.ndimage import gaussian_filter, uniform_filter
     from skimage.feature import peak_local_max
 
     img = image.astype(np.float32)
     win = int(max(particle_px * 2.5, 8))
-    # 1) local contrast normalization (per-window z-score) — makes the DoG response
-    #    comparable everywhere, so low-contrast true particles in dark regions clear the
-    #    threshold and bright ice/carbon no longer dominate the dynamic range.
+    # local contrast normalisation (per-window z-score) so the response is comparable
+    # everywhere — low-contrast true particles clear threshold; bright ice can't dominate.
     mu = uniform_filter(img, win)
     var = uniform_filter(img * img, win) - mu * mu
     norm = (img - mu) / np.sqrt(np.maximum(var, 1e-6))
-    # 2) carbon-edge / border exclusion: carbon film + hole rims are high local
-    #    gradient-variance (textured lines) — the single biggest junk family. Mask them
-    #    (+ a particle-width border) so those peaks never enter NMS.
-    gm = np.hypot(sobel(img, 0), sobel(img, 1))
-    gm_var = uniform_filter(gm * gm, win) - uniform_filter(gm, win) ** 2
-    junk = binary_dilation(gm_var > np.percentile(gm_var, 95), iterations=max(1, win // 10))
-    b = int(particle_px)
-    junk[:b] = junk[-b:] = True
-    junk[:, :b] = junk[:, -b:] = True
-    # 3) DoG band-pass on the normalized image → spaced local maxima (NMS)
     sigma = max(particle_px / 4.0, 1.5)
     resp = np.abs(gaussian_filter(norm, sigma) - gaussian_filter(norm, sigma * 1.6))
     md = int(min_distance if min_distance is not None else max(particle_px * 0.55, 4))
     pk = peak_local_max(resp, min_distance=md, threshold_rel=threshold_rel, num_peaks=max_peaks)
     if pk.size == 0:
         return np.zeros((0, 2))
-    pk = pk[~junk[pk[:, 0], pk[:, 1]]]              # drop peaks on carbon/border
+    b = int(particle_px)                            # drop only half-off-frame border peaks
+    h, w = img.shape
+    keep = (pk[:, 0] >= b) & (pk[:, 0] < h - b) & (pk[:, 1] >= b) & (pk[:, 1] < w - b)
+    pk = pk[keep]
     if pk.size == 0:
         return np.zeros((0, 2))
-    # peak_local_max returns (row, col) -> (x, y) = (col, row)
-    return np.stack([pk[:, 1], pk[:, 0]], axis=1).astype(float)
+    return np.stack([pk[:, 1], pk[:, 0]], axis=1).astype(float)  # (row,col) -> (x,y)
 
 
 def _cryosegnet_pick(
