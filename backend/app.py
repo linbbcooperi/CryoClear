@@ -140,11 +140,22 @@ class State:
 
     # ---- model / learner ----
     def _train_table(self):
-        p = config.PROCESSED / self.empiar / "junk_train.npz"
-        if not p.exists():
+        """Labelled (features, is_junk) table from the webcache (always present for a
+        ground-truth dataset). Returns None when the dataset has no GT to seed from."""
+        Xs, ys = [], []
+        for m in self.index["micrographs"]:
+            try:
+                d = self.npz(m["stem"])
+            except Exception:
+                continue
+            tj = d["true_junk"]
+            k = tj != -1
+            if k.any():
+                Xs.append(d["feats"][k])
+                ys.append(tj[k])
+        if not Xs:
             return None
-        d = np.load(p)
-        return d["X"].astype(float), d["y"].astype(int)
+        return np.vstack(Xs).astype(float), np.concatenate(ys).astype(int)
 
     def _seed_learner(self, coldstart: bool):
         tbl = self._train_table()
@@ -169,17 +180,24 @@ class State:
             self._npz[stem] = dict(np.load(self.cache / "data" / f"{stem}.npz"))
         return self._npz[stem]
 
-    def scores(self, stem: str) -> np.ndarray:
-        d = self.npz(stem)
-        if self.mode == "learn":
-            feats = d["feats"]
-            return (np.asarray(self.learner.clf.predict_junk_proba(feats))
-                    if len(feats) else np.zeros(0))
+    def _model_scores(self, d: dict) -> np.ndarray:
         key = {"lgbm": "lgbm_scores", "rf": "rf_scores", "sgd": "sgd_scores",
                "cnn": "cnn_scores"}.get(self.clf_model)
         if key and key in d:
             return d[key]
         return d["lgbm_scores"] if "lgbm_scores" in d else d["scores"]
+
+    def scores(self, stem: str) -> np.ndarray:
+        d = self.npz(stem)
+        if self.mode == "learn":
+            feats = d["feats"]
+            if len(feats) and getattr(self.learner.clf, "_fitted", False):
+                try:
+                    return np.asarray(self.learner.clf.predict_junk_proba(feats))
+                except Exception:
+                    pass
+            return self._model_scores(d)   # learner not trained yet (e.g. no GT) → model fallback
+        return self._model_scores(d)
 
     def junk_mask(self, stem: str) -> np.ndarray:
         junk = self.scores(stem) >= self.threshold
