@@ -34,8 +34,8 @@ def pick(image: np.ndarray, backend: str = "blob", **kwargs) -> np.ndarray:
     raise ValueError(f"unknown backend: {backend}")
 
 
-def _blob_pick(image: np.ndarray, particle_px: float = 27.0, threshold_rel: float = 0.16,
-               min_distance: float | None = None, max_peaks: int = 2200) -> np.ndarray:
+def _blob_pick(image: np.ndarray, particle_px: float = 27.0, threshold_rel: float = 0.04,
+               min_distance: float | None = None, max_peaks: int = 4000) -> np.ndarray:
     """Band-pass (Difference-of-Gaussians) blob detector with non-max suppression.
 
     A LoG with a permissive threshold fires on every texture variation → a dense,
