@@ -13,17 +13,31 @@ import numpy as np
 
 
 class JunkClassifier:
-    """Binary classifier: is a candidate JUNK (True) or a real particle (False)."""
+    """Binary junk classifier (JUNK=1 / particle=0) over per-candidate features.
 
-    def __init__(self, n_estimators: int = 200, random_state: int = 0):
-        from sklearn.ensemble import RandomForestClassifier
+    Two backends: ``rf`` (scikit-learn RandomForest) and ``lgbm`` (LightGBM gradient-
+    boosted trees — best tabular accuracy, captures the nonlinear ice/carbon/aggregate
+    signatures, refits in well under a second). Same API for both.
+    """
 
-        self.model = RandomForestClassifier(
-            n_estimators=n_estimators,
-            random_state=random_state,
-            class_weight="balanced",
-            n_jobs=-1,
-        )
+    def __init__(self, model_type: str = "rf", n_estimators: int = 300,
+                 random_state: int = 0):
+        self.model_type = model_type
+        if model_type == "lgbm":
+            from lightgbm import LGBMClassifier
+
+            self.model = LGBMClassifier(
+                n_estimators=400, num_leaves=31, learning_rate=0.05,
+                subsample=0.8, colsample_bytree=0.8, class_weight="balanced",
+                n_jobs=-1, random_state=random_state, verbosity=-1,
+            )
+        else:
+            from sklearn.ensemble import RandomForestClassifier
+
+            self.model = RandomForestClassifier(
+                n_estimators=n_estimators, random_state=random_state,
+                class_weight="balanced", n_jobs=-1,
+            )
         self._fitted = False
 
     def fit(self, features: np.ndarray, is_junk: Sequence) -> "JunkClassifier":
