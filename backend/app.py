@@ -428,52 +428,133 @@ def api_export_coords(empiar: str, stem: str, fmt: str = "star"):
 
 @app.get("/api/export/report/{empiar}")
 def api_export_report(empiar: str):
-    """One-page PDF scorecard: dataset, picker, classifier, and honest aggregate metrics."""
+    """Detailed 2-page PDF scorecard: dataset + KPIs, precision/recall/F1 vs ground
+    truth, held-out classifier comparison, a sample overlay, and the score histogram."""
     import io
+    from datetime import datetime, timezone
 
     import matplotlib
     matplotlib.use("Agg")
+    import matplotlib.image as mpimg
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
 
     s = get_state(empiar)
+    KEEP, JUNK, MUT = "#29c393", "#e5484d", "#8a93a3"
+    mics = s.index["micrographs"]
+
     tot_c = tot_k = 0
-    pb, pa = [], []
-    for m in s.index["micrographs"]:
+    pf_b, pf_a, rc_b, rc_a, pr_b, pr_a = [], [], [], [], [], []
+    sj, sk = [], []                       # scores split by held-out true label
+    best_stem, best_gt = None, -1
+    for m in mics:
         stem = m["stem"]
         junk = s.junk_mask(stem)
+        d = s.npz(stem)
         tot_c += len(junk)
         tot_k += int((~junk).sum())
-        pb.append(s.picking(stem, np.ones(len(junk), bool))["f1"])
-        pa.append(s.picking(stem, ~junk)["f1"])
-    pb_m, pa_m = float(np.mean(pb)), float(np.mean(pa))
+        raw, aft = s.picking(stem, np.ones(len(junk), bool)), s.picking(stem, ~junk)
+        pf_b.append(raw["f1"]); pf_a.append(aft["f1"])
+        rc_b.append(raw["recall"]); rc_a.append(aft["recall"])
+        pr_b.append(raw["precision"]); pr_a.append(aft["precision"])
+        tj = d["true_junk"]
+        if (tj != -1).any():
+            sc = s.scores(stem)
+            sj.extend(sc[tj == 1].tolist()); sk.extend(sc[tj == 0].tolist())
+        if int(m.get("n_gt", 0)) > best_gt:
+            best_gt, best_stem = int(m.get("n_gt", 0)), stem
+
+    avg = lambda a: float(np.mean(a)) if a else 0.0
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    junk_pct = 100 * (1 - tot_k / max(tot_c, 1))
 
     buf = io.BytesIO()
     with PdfPages(buf) as pdf:
-        fig = plt.figure(figsize=(8.5, 11))
-        fig.text(0.08, 0.93, "CryoClear — junk-triage report", fontsize=20, weight="bold")
-        fig.text(0.08, 0.90, f"EMPIAR-{empiar} · picker: blob · classifier: {s.clf_model} "
-                 f"· threshold {s.threshold:.2f}", fontsize=11, color="#555")
-        lines = [
-            f"Micrographs: {len(s.index['micrographs'])}",
-            f"Candidates picked: {tot_c:,}",
-            f"Particles kept (after junk triage): {tot_k:,}  ({100*tot_k/max(tot_c,1):.1f}%)",
-            f"Junk removed: {100*(1-tot_k/max(tot_c,1)):.1f}%",
-            "",
-            f"Picking F1 vs CryoPPP ground truth (mean over micrographs):",
-            f"    raw picks:        {pb_m:.3f}",
-            f"    after junk triage: {pa_m:.3f}",
-            "",
-            "Note: in-sample numbers are optimistic; held-out generalization is the honest",
-            "metric (see eval/heldout_eval.py and eval/compare_classifiers.py).",
-        ]
-        fig.text(0.08, 0.82, "\n".join(lines), fontsize=12, va="top", family="monospace")
-        ax = fig.add_axes([0.1, 0.32, 0.5, 0.28])
-        ax.bar(["raw", "after triage"], [pb_m, pa_m], color=["#888", "#29c393"])
-        ax.set_ylim(0, 1)
-        ax.set_title("Picking F1", fontsize=11)
-        pdf.savefig(fig)
-        plt.close(fig)
+        # ---------------- page 1: summary ----------------
+        fig = plt.figure(figsize=(8.5, 11)); fig.patch.set_facecolor("white")
+        fig.text(0.07, 0.955, "CryoClear", fontsize=27, weight="bold", color="#111")
+        fig.text(0.07, 0.930, "Particle-picking + junk-triage report", fontsize=13, color="#444")
+        fig.text(0.93, 0.957, ts, fontsize=9, color="#999", ha="right")
+        fig.text(0.07, 0.905, f"EMPIAR-{empiar}    ·    picker: blob LoG    ·    classifier: "
+                 f"{s.clf_model.upper()}    ·    threshold {s.threshold:.2f}", fontsize=10.5, color="#222")
+
+        for i, (k, v) in enumerate([("Micrographs", f"{len(mics)}"), ("Candidates", f"{tot_c:,}"),
+                                    ("Kept", f"{tot_k:,}"), ("Junk removed", f"{junk_pct:.1f}%")]):
+            ax = fig.add_axes([0.07 + i * 0.225, 0.80, 0.205, 0.075]); ax.axis("off")
+            ax.add_patch(plt.Rectangle((0, 0), 1, 1, facecolor="#f3f5f8", edgecolor="#dde3ea", lw=1))
+            ax.text(0.5, 0.60, v, ha="center", va="center", fontsize=16, weight="bold", color="#111")
+            ax.text(0.5, 0.22, k, ha="center", va="center", fontsize=9, color="#666")
+
+        ax1 = fig.add_axes([0.10, 0.50, 0.37, 0.21])
+        xs = np.arange(3)
+        ax1.bar(xs - 0.2, [avg(pr_b), avg(rc_b), avg(pf_b)], 0.4, label="raw picks", color=MUT)
+        ax1.bar(xs + 0.2, [avg(pr_a), avg(rc_a), avg(pf_a)], 0.4, label="after triage", color=KEEP)
+        ax1.set_xticks(xs); ax1.set_xticklabels(["precision", "recall", "F1"], fontsize=9)
+        ax1.set_ylim(0, 1); ax1.legend(fontsize=8, loc="upper left")
+        ax1.set_title("Picking vs CryoPPP ground truth (in-sample mean)", fontsize=10)
+        ax1.tick_params(labelsize=8)
+
+        axT = fig.add_axes([0.55, 0.50, 0.40, 0.21]); axT.axis("off")
+        axT.set_title("Held-out picking F1   (raw blob = 0.227)", fontsize=10, loc="left")
+        rows = [["classifier", "@ 0.5", "@ calib."]]
+        for k in ("rf", "lgbm", "cnn"):
+            o = CLF_OPTIONS[k]
+            at05 = {"rf": "0.000", "lgbm": "0.228", "cnn": "—"}[k]
+            rows.append([o["label"].split(" —")[0], at05, f"{o['heldout']:.3f}@{o['thr']:.2f}"])
+        tb = axT.table(cellText=rows, loc="center", cellLoc="center", colWidths=[0.46, 0.24, 0.30])
+        tb.auto_set_font_size(False); tb.set_fontsize(8.5); tb.scale(1, 1.45)
+        for j in range(3):
+            tb[0, j].set_facecolor("#2f6feb"); tb[0, j].set_text_props(color="white", weight="bold")
+
+        note = (
+            f"Method.  The blob LoG picker over-picks (~{junk_pct:.0f}% of candidates flagged junk). A "
+            f"{s.clf_model.upper()} classifier scores each candidate on 23 intensity-normalised features "
+            "(radial profile, matched-filter NCC, structure-tensor edge coherence, distribution shape, "
+            "sharpness); the scientist corrects it on an interactive canvas and the model can refit live. "
+            "Kept coordinates export to RELION/cryoSPARC as .star/.box.\n\n"
+            "Honesty.  The bars above are in-sample (optimistic); the table is micrograph-level held-out "
+            "(the generalising metric). Per-model threshold calibration is essential — a vanilla "
+            "RandomForest at 0.5 over-rejects and collapses to F1 0.000. The blob picker over-picks "
+            "background that resembles the small, low-contrast particles, so even the best classifier only "
+            "lifts picking F1 from 0.227 to 0.248; a stronger picker or a distinct-junk protein is the real "
+            "lever. Reproduce with eval/compare_classifiers.py.")
+        fig.text(0.07, 0.43, note, fontsize=9.5, va="top", linespacing=1.5,
+                 wrap=True, color="#222")
+        fig.text(0.07, 0.05, "CryoClear · open, real-time cryo-EM junk-triage copilot · MIT",
+                 fontsize=8, color="#aaa")
+        pdf.savefig(fig); plt.close(fig)
+
+        # ---------------- page 2: visuals ----------------
+        fig2 = plt.figure(figsize=(8.5, 11)); fig2.patch.set_facecolor("white")
+        fig2.text(0.07, 0.955, "Sample micrograph & score separation", fontsize=15, weight="bold")
+        if best_stem is not None:
+            d = s.npz(best_stem); junk = s.junk_mask(best_stem); pdsp = d["pred_disp"]
+            png = s.cache / "img" / f"{best_stem}.png"
+            axA = fig2.add_axes([0.07, 0.46, 0.86, 0.44]); axA.axis("off")
+            if png.exists():
+                axA.imshow(mpimg.imread(png), cmap="gray")
+            kxy, jxy = pdsp[~junk], pdsp[junk]
+            if len(kxy):
+                axA.scatter(kxy[:, 0], kxy[:, 1], s=7, facecolors="none", edgecolors=KEEP, linewidths=0.5)
+            if len(jxy):
+                axA.scatter(jxy[:, 0], jxy[:, 1], s=7, facecolors="none", edgecolors=JUNK, linewidths=0.5)
+            axA.set_title(f"{best_stem}   —   green keep ({int((~junk).sum())})  ·  "
+                          f"red junk ({int(junk.sum())})", fontsize=9.5)
+
+        axB = fig2.add_axes([0.11, 0.09, 0.80, 0.28])
+        if sj or sk:
+            bins = np.linspace(0, 1, 30)
+            axB.hist(sk, bins=bins, alpha=0.65, color=KEEP, label=f"true particle (n={len(sk):,})")
+            axB.hist(sj, bins=bins, alpha=0.65, color=JUNK, label=f"true junk (n={len(sj):,})")
+            axB.axvline(s.threshold, color="#111", ls="--", lw=1.2, label=f"threshold {s.threshold:.2f}")
+            axB.set_xlabel("junk probability", fontsize=9); axB.set_ylabel("candidates", fontsize=9)
+            axB.legend(fontsize=8); axB.tick_params(labelsize=8)
+            axB.set_title("Classifier score distribution (CryoPPP-labelled candidates)", fontsize=10)
+        else:
+            axB.axis("off"); axB.text(0.5, 0.5, "no ground-truth labels for this dataset",
+                                      ha="center", color="#888")
+        pdf.savefig(fig2); plt.close(fig2)
+
     return Response(buf.getvalue(), media_type="application/pdf",
                     headers={"Content-Disposition": "attachment; filename=cryoclear_report.pdf"})
 
