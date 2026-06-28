@@ -90,7 +90,9 @@ class State:
             feats = d["feats"]
             return (np.asarray(self.learner.clf.predict_junk_proba(feats))
                     if len(feats) else np.zeros(0))
-        return d["scores"]   # precomputed saved-model scores (instant)
+        if "cnn_scores" in d:        # CNN (honest, generalizes better than the RF)
+            return d["cnn_scores"]
+        return d["scores"]           # RandomForest fallback
 
     def junk_mask(self, stem: str) -> np.ndarray:
         junk = self.scores(stem) >= self.threshold
