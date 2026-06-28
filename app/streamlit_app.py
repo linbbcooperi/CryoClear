@@ -74,6 +74,11 @@ with st.sidebar:
     factor = st.slider("Downsample factor", 1, 8, 4)
     box = st.slider("Feature box (px, display)", 24, 128, 64, 8)
     threshold = st.slider("Junk threshold", 0.0, 1.0, 0.5, 0.05)
+    st.divider()
+    al_on = st.checkbox("🎓 Active-learning demo (M2)", value=False,
+                        help="Seed a tiny model from a few labels, then teach it corrections "
+                             "and watch the junk-rejection F1 climb live.")
+    al_seed = st.slider("Seed examples", 10, 200, 30, 10, disabled=not al_on)
     st.caption("M1→M4 build order lives in CLAUDE.md")
 
 RAW = config.RAW / empiar
@@ -105,6 +110,16 @@ def _load_full_res(path_str: str) -> np.ndarray:
     return io_mrc.normalize_8bit(io_mrc.load_mrc(path_str))
 
 
+@st.cache_data(show_spinner=False)
+def _load_train_table(empiar_id: str):
+    """Labelled feature table saved by train_junk_classifier.py (for the M2 seed)."""
+    p = config.PROCESSED / empiar_id / "junk_train.npz"
+    if not p.exists():
+        return None
+    d = np.load(p)
+    return d["X"].astype(float), d["y"].astype(int)
+
+
 def _load_model() -> JunkClassifier | None:
     if MODEL_PATH.exists():
         try:
@@ -128,12 +143,12 @@ def _picks(img_disp: np.ndarray, mic_name: str | None):
     return pred_disp, pred_disp * float(factor)
 
 
-def _record_correction(i: int, feats: np.ndarray) -> None:
-    """Flag candidate `i` as junk for this micrograph and feed the ActiveLearner."""
-    learner = st.session_state.learner or ActiveLearner(_load_model() or JunkClassifier())
-    learner.add_corrections(feats[i:i + 1], [True])
-    st.session_state.learner = learner
-    st.session_state.flagged.setdefault(_key, set()).add(int(i))
+def _record_correction(i: int, feats: np.ndarray, label: bool = True) -> None:
+    """Feed candidate `i`'s correction to the live learner; flag it red if it's junk."""
+    if st.session_state.al_learner is not None and len(feats):
+        st.session_state.al_learner.add_corrections(feats[i:i + 1], [int(label)])
+    if label:
+        st.session_state.flagged.setdefault(_key, set()).add(int(i))
     st.session_state.corrections += 1
 
 
@@ -148,6 +163,14 @@ if "stream_i" not in st.session_state:
     st.session_state.stream_i = 0
 if "t0" not in st.session_state:
     st.session_state.t0 = time.time()
+if "al_learner" not in st.session_state:
+    st.session_state.al_learner = None     # ActiveLearner for the live M2 loop
+if "al_seed" not in st.session_state:
+    st.session_state.al_seed = None
+if "f1_history" not in st.session_state:
+    st.session_state.f1_history = []       # junk-F1 after each teach round
+if "taught" not in st.session_state:
+    st.session_state.taught = 0
 
 # ---------------------------------------------------------------- pick a micrograph
 mic_names = _list_micrographs(empiar)
@@ -178,18 +201,42 @@ pred_disp, pred_full = _picks(img, sel)
 clf = _load_model()
 # Extract features the SAME way the model was trained: full-res image at full-res
 # coords with the dataset box. (Synthetic/no-model path uses the display image.)
-if have_real and sel is not None and clf is not None and len(pred_full):
+if have_real and sel is not None and len(pred_full):
     img_full = _load_full_res(str(RAW / "micrographs" / sel))
     feats = features.extract_features(img_full, pred_full, box=config.DEMO_PARTICLE_DIAMETER_PX)
 else:
     feats = features.extract_features(img, pred_disp, box=box)
 
-if clf is not None and len(feats):
+# Ground-truth-derived "true junk" labels for THIS micrograph — validates the live
+# active-learning loop against expert labels (a candidate not matching any GT = junk).
+true_is_junk = None
+if gt_path is not None and gt_path.exists() and len(pred_full):
+    _gt_xy = coords.read_star_coords(gt_path)
+    _matches, _fp, _fn = metrics.match_particles(pred_full, _gt_xy, RADIUS)
+    true_is_junk = np.ones(len(pred_full), dtype=bool)
+    for _pi, _gi, _d in _matches:
+        true_is_junk[_pi] = False
+
+# M2: with the active-learning demo on, predict using a learner seeded from a few
+# labels (so corrections visibly improve it); otherwise use the trained model.
+train_tbl = _load_train_table(empiar) if al_on else None
+if al_on and train_tbl is not None and len(feats):
+    if st.session_state.al_learner is None or st.session_state.al_seed != al_seed:
+        _Xt, _yt = train_tbl
+        _rng = np.random.default_rng(0)
+        _idx = _rng.choice(len(_yt), size=min(al_seed, len(_yt)), replace=False)
+        st.session_state.al_learner = ActiveLearner().seed(_Xt[_idx], _yt[_idx])
+        st.session_state.al_seed = al_seed
+        st.session_state.f1_history = []
+        st.session_state.taught = 0
+    is_junk = np.asarray(
+        st.session_state.al_learner.predict_is_junk(feats, threshold=threshold), dtype=bool)
+elif clf is not None and len(feats):
     is_junk = np.asarray(clf.predict_is_junk(feats, threshold=threshold), dtype=bool)
 else:
     is_junk = np.zeros(len(pred_disp), dtype=bool)
 
-# user corrections for this micrograph override the model (visible HITL — M2)
+# user corrections for this micrograph override the prediction (visible HITL)
 _key = sel or "__synthetic__"
 for i in st.session_state.flagged.get(_key, set()):
     if 0 <= i < len(is_junk):
@@ -244,6 +291,15 @@ with right:
         st.caption(f"raw F1={before.f1:.3f} (P={before.precision:.2f} R={before.recall:.2f}) → "
                    f"kept F1={after.f1:.3f} (P={after.precision:.2f} R={after.recall:.2f})")
 
+    if al_on and true_is_junk is not None and len(is_junk):
+        jr = metrics.junk_rejection_metrics(is_junk, true_is_junk)
+        st.divider()
+        st.caption(f"🎓 Active learning — taught {st.session_state.taught} corrections")
+        _delta = None
+        if st.session_state.f1_history:
+            _delta = f"{jr['junk_f1'] - st.session_state.f1_history[0]:+.3f} since seed"
+        st.metric("Junk-rejection F1 (live)", f"{jr['junk_f1']:.3f}", delta=_delta)
+
     st.divider()
     st.caption(f"Corrections fed back: {st.session_state.corrections}")
     if clf is None:
@@ -252,32 +308,56 @@ with right:
 
 # ---------------------------------------------------------------- active learning (M2)
 st.divider()
-st.subheader("Human-in-the-loop correction")
+st.subheader("🎓 Human-in-the-loop active learning (M2)")
 
-if not _HAVE_CLICK:
-    st.caption("Install `streamlit-image-coordinates` for click-to-reject on the image. "
-               "Until then, use the buttons below.")
-    c1, c2, _ = st.columns([1, 1, 4])
-    flip_to_junk = c1.button("Flag brightest candidate as junk")
-    if flip_to_junk and n_total:
-        # heuristic stand-in for a click: pick the highest-contrast not-yet-flagged candidate
-        order = np.argsort(-feats[:, 4]) if len(feats) else np.array([0])
-        already = st.session_state.flagged.get(_key, set())
-        i = next((int(k) for k in order if int(k) not in already), int(order[0]))
-        _record_correction(i, feats)
+if al_on and st.session_state.al_learner is not None and true_is_junk is not None and len(feats):
+    learner = st.session_state.al_learner
+    if not st.session_state.f1_history:
+        st.session_state.f1_history = [
+            metrics.junk_rejection_metrics(is_junk, true_is_junk)["junk_f1"]]
+
+    c1, c2, c3 = st.columns([1.3, 1, 1])
+    teach_n = c1.select_slider("Corrections / round", options=[5, 10, 20, 50], value=10)
+    if c2.button("👩‍🔬 Teach", type="primary"):
+        wrong = np.where(is_junk != true_is_junk)[0]
+        if len(wrong):
+            take = wrong[:teach_n]
+            learner.add_corrections(feats[take], true_is_junk[take])
+            st.session_state.taught += len(take)
+            new_pred = np.asarray(learner.predict_is_junk(feats, threshold=threshold), dtype=bool)
+            st.session_state.f1_history.append(
+                metrics.junk_rejection_metrics(new_pred, true_is_junk)["junk_f1"])
         st.rerun()
+    if c3.button("↺ Reset"):
+        st.session_state.al_learner = None
+        st.session_state.al_seed = None
+        st.rerun()
+
+    if len(st.session_state.f1_history) > 1:
+        import pandas as pd
+        st.caption("Junk-rejection F1 climbs as you teach it (seed → correction rounds):")
+        st.line_chart(pd.DataFrame({"junk-F1": st.session_state.f1_history}), height=180)
+    st.caption(f"seed F1 {st.session_state.f1_history[0]:.3f} → now "
+               f"{st.session_state.f1_history[-1]:.3f}  ·  {st.session_state.taught} corrections taught")
+elif al_on:
+    st.info("Active-learning demo needs the saved training table "
+            f"(data/processed/{empiar}/junk_train.npz) and ground truth. "
+            "Run scripts/train_junk_classifier.py first.")
 else:
-    st.caption("Click a candidate on the image below to mark it **junk** "
-               "and feed the correction to the model.")
+    st.caption("Turn on **Active-learning demo (M2)** in the sidebar to teach the model live, "
+               "or click a candidate below to correct it.")
+
+# manual click-to-correct (feeds the true label when known)
+if _HAVE_CLICK:
     rgb = np.stack([img] * 3, axis=-1).astype(np.uint8)
     clicked = click_image(rgb, key="clickimg")
     if clicked and n_total:
-        cx, cy = clicked["x"], clicked["y"]
-        d = np.linalg.norm(pred_disp - np.array([cx, cy]), axis=1)
+        d = np.linalg.norm(pred_disp - np.array([clicked["x"], clicked["y"]]), axis=1)
         i = int(np.argmin(d))
-        if d[i] <= box:  # only if the click is near a candidate
-            _record_correction(i, feats)
+        if d[i] <= box:
+            lbl = bool(true_is_junk[i]) if true_is_junk is not None else True
+            _record_correction(i, feats, lbl)
             st.rerun()
 
-st.caption("Engine: CryoSegNet (cached) · junk classifier: RandomForest on per-candidate features · "
-           "open source (MIT). Build ladder M1→M4 in CLAUDE.md.")
+st.caption("Pickers: blob (LoG) + CryoSegNet (SAM, cached) · junk classifier: RandomForest · "
+           "live active learning · open source (MIT). Build ladder M1→M4 in CLAUDE.md.")

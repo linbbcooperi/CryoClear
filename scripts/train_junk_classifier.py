@@ -112,7 +112,12 @@ def _train_real(empiar: str, cache_dir: Path, radius: float, box: int,
 
     # refit on ALL data and save for the app
     JunkClassifier().fit(X, y).save(out_path)
+    # also save the labelled feature table so the app can seed the live active-learning
+    # loop (M2) from real examples
+    train_path = out_path.parent / "junk_train.npz"
+    np.savez_compressed(train_path, X=X.astype(np.float32), y=y.astype(np.int8))
     print(f"Saved model -> {out_path}")
+    print(f"Saved training table -> {train_path}  (X={X.shape}, for active-learning seed)")
     return 0
 
 
