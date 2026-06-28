@@ -48,16 +48,35 @@ def _blob_pick(image: np.ndarray, particle_px: float = 27.0, threshold_rel: floa
     ``particle_px`` is the particle diameter in *this image's* pixels (the display
     image is downsampled by io_mrc factor, so ~108/4 ≈ 27 px for β-gal).
     """
-    from scipy.ndimage import gaussian_filter
+    from scipy.ndimage import (binary_dilation, gaussian_filter, sobel,
+                               uniform_filter)
     from skimage.feature import peak_local_max
 
-    img = image.astype(float)
-    img = (img - img.min()) / (np.ptp(img) + 1e-6)  # np.ptp: ndarray.ptp() removed in NumPy 2.0
+    img = image.astype(np.float32)
+    win = int(max(particle_px * 2.5, 8))
+    # 1) local contrast normalization (per-window z-score) — makes the DoG response
+    #    comparable everywhere, so low-contrast true particles in dark regions clear the
+    #    threshold and bright ice/carbon no longer dominate the dynamic range.
+    mu = uniform_filter(img, win)
+    var = uniform_filter(img * img, win) - mu * mu
+    norm = (img - mu) / np.sqrt(np.maximum(var, 1e-6))
+    # 2) carbon-edge / border exclusion: carbon film + hole rims are high local
+    #    gradient-variance (textured lines) — the single biggest junk family. Mask them
+    #    (+ a particle-width border) so those peaks never enter NMS.
+    gm = np.hypot(sobel(img, 0), sobel(img, 1))
+    gm_var = uniform_filter(gm * gm, win) - uniform_filter(gm, win) ** 2
+    junk = binary_dilation(gm_var > np.percentile(gm_var, 95), iterations=max(1, win // 10))
+    b = int(particle_px)
+    junk[:b] = junk[-b:] = True
+    junk[:, :b] = junk[:, -b:] = True
+    # 3) DoG band-pass on the normalized image → spaced local maxima (NMS)
     sigma = max(particle_px / 4.0, 1.5)
-    dog = gaussian_filter(img, sigma) - gaussian_filter(img, sigma * 1.6)
-    resp = np.abs(dog)                              # particle blobs (dark or bright) → strong |DoG|
+    resp = np.abs(gaussian_filter(norm, sigma) - gaussian_filter(norm, sigma * 1.6))
     md = int(min_distance if min_distance is not None else max(particle_px * 0.55, 4))
     pk = peak_local_max(resp, min_distance=md, threshold_rel=threshold_rel, num_peaks=max_peaks)
+    if pk.size == 0:
+        return np.zeros((0, 2))
+    pk = pk[~junk[pk[:, 0], pk[:, 1]]]              # drop peaks on carbon/border
     if pk.size == 0:
         return np.zeros((0, 2))
     # peak_local_max returns (row, col) -> (x, y) = (col, row)
