@@ -31,6 +31,16 @@ from backend.precompute import cache_dir, precompute  # noqa: E402
 FRONTEND = Path(__file__).resolve().parents[1] / "frontend"
 app = FastAPI(title="CryoClear")
 
+# Junk-classifier options. `heldout` = best achievable held-out picking F1 (raw blob
+# picks are 0.227); `thr` = the per-model calibrated default threshold from that sweep
+# (eval/compare_classifiers.py). RF must run at a high threshold or it over-rejects
+# (F1 collapses to 0.0 at 0.5); LightGBM is robust and is the default.
+CLF_OPTIONS = {
+    "lgbm": {"label": "LightGBM — boosted trees (robust, default)", "heldout": 0.248, "thr": 0.60},
+    "rf": {"label": "RandomForest — needs high threshold or over-rejects", "heldout": 0.248, "thr": 0.85},
+    "cnn": {"label": "CNN — learned on raw 64px crops", "heldout": 0.248, "thr": 0.50},
+}
+
 
 class State:
     def __init__(self, empiar: str):
@@ -42,9 +52,9 @@ class State:
         self.index = json.loads(idx_path.read_text())
         self.factor = self.index["factor"]
         self.radius = self.index["radius"]
-        self.threshold = 0.5
-        self.mode = "model"               # "model"=precomputed scores | "learn"=live cold-start AL
         self.clf_model = "lgbm"           # "lgbm" | "rf" | "cnn" (model mode)
+        self.threshold = CLF_OPTIONS[self.clf_model]["thr"]   # per-model calibrated default
+        self.mode = "model"               # "model"=precomputed scores | "learn"=live cold-start AL
         self._npz: dict[str, dict] = {}
         self.overrides: dict[str, dict] = {}   # {stem: {idx: label}} manual HITL corrections
         self.learner = ActiveLearner(JunkClassifier())
@@ -137,10 +147,7 @@ def api_state(empiar: str | None = None):
             "threshold": s.threshold, "coldstart": s.coldstart,
             "corrections": s.corrections, "f1_history": s.f1_history,
             "clf_model": s.clf_model, "mode": s.mode,
-            "clf_options": {
-                "lgbm": {"label": "LightGBM (boosted trees)", "heldout": 0.234},
-                "rf": {"label": "RandomForest", "heldout": 0.025},
-                "cnn": {"label": "CNN (raw crops)", "heldout": 0.248}},
+            "clf_options": CLF_OPTIONS,
             "micrographs": s.index["micrographs"]}
 
 
@@ -173,7 +180,9 @@ def api_mode(payload: dict):
 def api_clf_model(payload: dict):
     s = get_state(payload.get("empiar"))
     s.clf_model = payload.get("clf_model", "lgbm")
-    return {"clf_model": s.clf_model}
+    # snap the threshold to this model's calibrated default so it doesn't over/under-reject
+    s.threshold = CLF_OPTIONS.get(s.clf_model, {}).get("thr", s.threshold)
+    return {"clf_model": s.clf_model, "threshold": s.threshold}
 
 
 @app.post("/api/correct")

@@ -186,7 +186,7 @@ function App() {
 
   const changeTh = (t) => { setTh(t); J('/api/threshold', { empiar, threshold: t }).then(() => load()); };
   const switchMode = (m) => { setMode(m); J('/api/mode', { empiar, mode: m }).then(() => { setF1([]); load(); }); };
-  const switchClf = (m) => { setClf(m); J('/api/clf_model', { empiar, clf_model: m }).then(() => load()); };
+  const switchClf = (m) => { setClf(m); J('/api/clf_model', { empiar, clf_model: m }).then(r => { if (r && r.threshold != null) setTh(r.threshold); load(); }); };
   const reset = () => { J('/api/reset', { empiar, coldstart: mode === 'learn' }).then(() => { setF1([]); load(); }); };
   const run2d = () => { setBusy2d(true); J('/api/classify2d', { empiar }).then(r => { setClasses(r); setBusy2d(false); }); };
   const savePng = (type) => {
