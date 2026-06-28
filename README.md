@@ -7,14 +7,13 @@ It picks protein particles from cryo-EM micrographs, **flags and removes junk** 
 
 ## Table of Contents
 
-- [Overview](#Overview)
+- [Overview](#overview)
 - [What CryoClear Does](#what-cryoclear-does)
 - [Quickstart (uv)](#quickstart-uv)
-- [On the GPU box (RunPod)](#on-the-gpu-box-runpod)
+- [Features (M1–M4)](#features-the-milestone-ladder-all-live)
 - [Architecture](#architecture)
-- [Junk Classifier](#junk-classifier)
-- [Evaluation & Metrics](#evaluation--metrics)
-- [API Endpoints (RunPod)](#api-endpoints-runpod)
+- [Junk Classifier](#junk-classifier-the-novel-piece)
+- [Evaluation & Metrics](#evaluation--metrics-honest)
 - [Status](#status)
 - [License](#license)
 
@@ -69,27 +68,67 @@ Full GPU + data + milestone plan: [`docs/07_runpod_build_plan.md`](docs/07_runpo
 
 ---
 
+## Features (the milestone ladder, all live)
+
+| | Feature | What it does |
+|---|---|---|
+| **M1** | Picking + junk flags + metrics | Pick particles (blob LoG or CryoSegNet), classify each candidate keep/junk, score precision/recall/F1 vs CryoPPP ground truth. |
+| **M2** | Live active learning | Cold-start a tiny junk model, teach it corrections, watch junk-rejection F1 climb live (the "it learns from me" loop). |
+| **M3** | Real-time streaming | Auto-feed micrographs on a timer with a live throughput + %junk dashboard. |
+| **M4** | 2D class averages | Reference-free 2D classification of the kept particles → class-average montage (the "these picks are real" proof). |
+
+Run each: `make app` then toggle the sidebar (Active-learning / Auto-stream) and the
+"2D class averages" expander. CLI: `scripts/run_baseline.py`, `scripts/train_junk_classifier.py`,
+`eval/class_averages.py`, `eval/heldout_eval.py`.
+
 ## Architecture
 
-_TODO_
+```
+MRC micrograph → preprocess (io_mrc) → picker (blob LoG | CryoSegNet/SAM, cached .star)
+   → per-candidate features (features.py) → JUNK CLASSIFIER (RandomForest, junk_classifier.py)
+   → active-learning update from corrections (active_learning.py)
+   → UI overlay green=keep / red=junk + live metrics (metrics.py) + stream dashboard (stream.py)
+   → 2D class averages of kept particles (class2d.py)  → montage
+```
 
-## Junk Classifier
+## Junk Classifier (the novel piece)
 
-_TODO_
+A lightweight scikit-learn RandomForest on 8 interpretable per-candidate features
+(mean/std/contrast/edge-density/blobiness…). Labels come from CryoPPP: a candidate
+matching a ground-truth particle = keep, otherwise = junk. Trains in seconds, updates
+instantly for the human-in-the-loop loop.
 
-## Evaluation & Metrics
+## Evaluation & Metrics (honest)
 
-_TODO_
+On EMPIAR-10017 β-galactosidase (real CryoPPP ground truth):
 
-## API Endpoints (RunPod)
+- **The problem:** the blob picker over-picks — recall ≈ 0.997 but precision ≈ 0.13
+  (~4,300 junk false-positives per micrograph), picking **F1 ≈ 0.23**.
+- **Junk classifier (held-out, micrograph-level):** junk-rejection **F1 ≈ 0.93**.
+- **After junk triage (in-sample):** picking **F1 ≈ 0.998** — *optimistic / in-sample*.
+- **After junk triage (held-out):** modest improvement at a calibrated threshold
+  (picking F1 ≈ 0.22 → ≈ 0.36); the default threshold over-rejects on unseen micrographs.
+  More training micrographs + per-dataset threshold calibration would improve this.
+- **CryoSegNet** runs on the GPU (incl. NVIDIA Blackwell via a torch-cu128 env) but
+  under-picks β-gal with default settings (recall ≈ 0.11); blob + junk-triage is the
+  stronger demo.
 
-_TODO_
+Reproduce: `uv run python eval/heldout_eval.py --empiar 10017 --radius 54 --box 108`.
+
+## Running on the GPU box
+
+See [`docs/07_runpod_build_plan.md`](docs/07_runpod_build_plan.md) and
+[`docs/08_runpod.md`](docs/08_runpod.md). CryoSegNet on a Blackwell GPU:
+[`scripts/setup_cryosegnet_blackwell.sh`](scripts/setup_cryosegnet_blackwell.sh).
 
 ---
 
 ## Status
 
-This is a **starter scaffold**. `metrics.py` and its tests are real and pass. Everything else is a clearly-marked stub with `TODO`s — build it following the milestone ladder in `CLAUDE.md`.
+**M1–M4 are all built and running on real data** (EMPIAR-10017). The app is an interactive
+Streamlit copilot; `metrics.py`, `features.py`, `coords.py`, `class2d.py` are tested. Honest
+about limits: in-sample picking numbers are optimistic; held-out generalization of the
+*picking* improvement needs threshold calibration (the *junk-rejection* generalizes well).
 
 ## License
 
