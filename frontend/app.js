@@ -7,21 +7,43 @@ const J = (url, body) => fetch(url, {
 const G = (url) => fetch(url).then(r => r.json());
 
 // ---------------------------------------------------------------- canvas viewer + HITL
-function Viewer({ empiar, stem, picks, factor, brush, threshold, onCorrect }) {
+function Viewer({ empiar, stem, picks, factor, brush, tool, onCorrect }) {
+  const wrapRef = useRef(null);
   const canvasRef = useRef(null);
   const imgRef = useRef(new Image());
+  const view = useRef({ z: 1, ox: 0, oy: 0 });
   const drag = useRef(null);
+  const R = Math.max(6, Math.round((108 / factor) / 2));
 
-  const R = Math.max(6, Math.round((108 / factor) / 2)); // box radius in display px
+  const applyStyle = () => {
+    const c = canvasRef.current; if (!c) return;
+    const v = view.current;
+    c.style.transform = `translate(${v.ox}px,${v.oy}px) scale(${v.z})`;
+  };
+  const fit = () => {
+    const w = wrapRef.current, c = canvasRef.current;
+    if (!w || !c || !c.width) return;
+    const z = Math.min(w.clientWidth / c.width, w.clientHeight / c.height) * 0.97;
+    view.current = { z, ox: (w.clientWidth - c.width * z) / 2, oy: (w.clientHeight - c.height * z) / 2 };
+    applyStyle();
+  };
+  const zoomAt = (cx, cy, fac) => {
+    const v = view.current;
+    const ix = (cx - v.ox) / v.z, iy = (cy - v.oy) / v.z;
+    const nz = Math.max(0.1, Math.min(25, v.z * fac));
+    view.current = { z: nz, ox: cx - ix * nz, oy: cy - iy * nz };
+    applyStyle();
+  };
 
-  const draw = useCallback((sel) => {
+  const draw = (sel) => {
     const cv = canvasRef.current, img = imgRef.current;
     if (!cv || !img.complete || !img.naturalWidth) return;
     cv.width = img.naturalWidth; cv.height = img.naturalHeight;
     const ctx = cv.getContext('2d');
     ctx.drawImage(img, 0, 0);
+    const lw = 1.4 / Math.max(view.current.z, 1);
     if (picks) {
-      ctx.lineWidth = 1.4;
+      ctx.lineWidth = lw;
       for (let i = 0; i < picks.x.length; i++) {
         const junk = picks.junk[i];
         ctx.strokeStyle = junk ? 'rgba(229,72,77,.85)' : 'rgba(41,195,147,.95)';
@@ -31,35 +53,48 @@ function Viewer({ empiar, stem, picks, factor, brush, threshold, onCorrect }) {
     if (sel) {
       ctx.strokeStyle = brush === 'keep' ? '#29c393' : '#e5484d';
       ctx.fillStyle = brush === 'keep' ? 'rgba(41,195,147,.12)' : 'rgba(229,72,77,.12)';
-      ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
+      ctx.lineWidth = lw; ctx.setLineDash([5, 4]);
       const x = Math.min(sel.x0, sel.x1), y = Math.min(sel.y0, sel.y1);
       ctx.fillRect(x, y, Math.abs(sel.x1 - sel.x0), Math.abs(sel.y1 - sel.y0));
       ctx.strokeRect(x, y, Math.abs(sel.x1 - sel.x0), Math.abs(sel.y1 - sel.y0));
       ctx.setLineDash([]);
     }
-  }, [picks, brush, R]);
+  };
 
   useEffect(() => {
     const img = imgRef.current;
-    img.onload = () => draw();
+    img.onload = () => { draw(); fit(); };
     img.src = `/api/img/${empiar}/${stem}.png`;
   }, [empiar, stem]);
-  useEffect(() => { draw(); }, [picks, draw]);
+  useEffect(() => { draw(); }, [picks]);
+  useEffect(() => {
+    const w = wrapRef.current; if (!w) return;
+    const onWheel = (e) => { e.preventDefault(); const r = w.getBoundingClientRect();
+      zoomAt(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.15 : 1 / 1.15); };
+    w.addEventListener('wheel', onWheel, { passive: false });
+    return () => w.removeEventListener('wheel', onWheel);
+  }, []);
 
-  const toCanvas = (e) => {
-    const cv = canvasRef.current, r = cv.getBoundingClientRect();
-    return { x: (e.clientX - r.left) * (cv.width / r.width),
-             y: (e.clientY - r.top) * (cv.height / r.height) };
+  const imgCoord = (e) => {
+    const r = canvasRef.current.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * (canvasRef.current.width / r.width),
+             y: (e.clientY - r.top) * (canvasRef.current.height / r.height) };
   };
-  const onDown = (e) => { const p = toCanvas(e); drag.current = { x0: p.x, y0: p.y, x1: p.x, y1: p.y, moved: false }; };
+  const onDown = (e) => {
+    if (tool === 'pan') { drag.current = { pan: true, x: e.clientX, y: e.clientY }; return; }
+    const p = imgCoord(e); drag.current = { x0: p.x, y0: p.y, x1: p.x, y1: p.y, moved: false };
+  };
   const onMove = (e) => {
-    if (!drag.current) return;
-    const p = toCanvas(e); drag.current.x1 = p.x; drag.current.y1 = p.y;
-    if (Math.abs(p.x - drag.current.x0) + Math.abs(p.y - drag.current.y0) > 4) drag.current.moved = true;
-    draw(drag.current);
+    const d = drag.current; if (!d) return;
+    if (d.pan) { const v = view.current; v.ox += e.clientX - d.x; v.oy += e.clientY - d.y;
+      d.x = e.clientX; d.y = e.clientY; applyStyle(); return; }
+    const p = imgCoord(e); d.x1 = p.x; d.y1 = p.y;
+    if (Math.abs(p.x - d.x0) + Math.abs(p.y - d.y0) > 4 / view.current.z) d.moved = true;
+    draw(d);
   };
-  const onUp = (e) => {
-    const d = drag.current; drag.current = null; if (!d || !picks) { draw(); return; }
+  const onUp = () => {
+    const d = drag.current; drag.current = null;
+    if (!d || d.pan || !picks) { draw(); return; }
     const lo = { x: Math.min(d.x0, d.x1), y: Math.min(d.y0, d.y1) };
     const hi = { x: Math.max(d.x0, d.x1), y: Math.max(d.y0, d.y1) };
     let sel = [];
@@ -72,14 +107,22 @@ function Viewer({ empiar, stem, picks, factor, brush, threshold, onCorrect }) {
         const dd = (picks.x[i] - d.x1) ** 2 + (picks.y[i] - d.y1) ** 2;
         if (dd < bd) { bd = dd; best = i; }
       }
-      if (best >= 0 && bd < (R * 2) ** 2) sel = [best];
+      if (best >= 0 && bd < (R * 2.5) ** 2) sel = [best];
     }
     if (sel.length) onCorrect(sel, brush);
     draw();
   };
 
-  return html`<canvas ref=${canvasRef} onMouseDown=${onDown} onMouseMove=${onMove}
-      onMouseUp=${onUp} onMouseLeave=${onUp}></canvas>`;
+  return html`<div class="canvas-wrap" ref=${wrapRef}
+       onMouseDown=${onDown} onMouseMove=${onMove} onMouseUp=${onUp} onMouseLeave=${onUp}
+       style=${{ cursor: tool === 'pan' ? 'grab' : 'crosshair' }}>
+    <canvas ref=${canvasRef} style=${{ position: 'absolute', transformOrigin: '0 0' }}></canvas>
+    <div class="zoomctl">
+      <button onClick=${() => { const r = wrapRef.current.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, 1.3); }}>+</button>
+      <button onClick=${() => { const r = wrapRef.current.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, 1 / 1.3); }}>−</button>
+      <button onClick=${fit}>Fit</button>
+    </div>
+  </div>`;
 }
 
 // ---------------------------------------------------------------- plotly helpers
@@ -112,6 +155,7 @@ function App() {
   const [mode, setMode] = useState('model');
   const [clfModel, setClf] = useState('lgbm');
   const [brush, setBrush] = useState('junk');
+  const [tool, setTool] = useState('select');
   const [f1hist, setF1] = useState([]);
   const [classes, setClasses] = useState(null);
   const [busy2d, setBusy2d] = useState(false);
@@ -193,13 +237,15 @@ function App() {
           <span class="lbl">brush:</span>
           <button class=${'sm junk' + (brush === 'junk' ? ' active' : '')} onClick=${() => setBrush('junk')}>dump <span class="kbd">d</span></button>
           <button class=${'sm keep' + (brush === 'keep' ? ' active' : '')} onClick=${() => setBrush('keep')}>keep <span class="kbd">k</span></button>
+          <div style=${{ width: '12px' }}></div>
+          <span class="lbl">tool:</span>
+          <button class=${'sm' + (tool === 'select' ? ' primary' : '')} onClick=${() => setTool('select')}>select</button>
+          <button class=${'sm' + (tool === 'pan' ? ' primary' : '')} onClick=${() => setTool('pan')}>pan</button>
           <div class="spacer"></div>
-          <span class="lbl">drag a box to ${brush} enclosed particles · click to toggle one</span>
+          <span class="lbl">scroll = zoom · ${tool === 'pan' ? 'drag = pan' : `drag a box to ${brush} · click toggles one`}</span>
         </div>
-        <div class="canvas-wrap">
-          <${Viewer} empiar=${empiar} stem=${stem} picks=${picks} factor=${info.factor}
-             brush=${brush} threshold=${threshold} onCorrect=${onCorrect} />
-        </div>
+        <${Viewer} empiar=${empiar} stem=${stem} picks=${picks} factor=${info.factor}
+           brush=${brush} tool=${tool} onCorrect=${onCorrect} />
         <div class="legend">
           <span><span class="sw" style=${{ background: '#29c393' }}></span>keep ${picks ? picks.junk.filter(v => !v).length : 0}</span>
           <span><span class="sw" style=${{ background: '#e5484d' }}></span>junk ${picks ? picks.junk.filter(v => v).length : 0}</span>
