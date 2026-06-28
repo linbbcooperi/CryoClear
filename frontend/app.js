@@ -433,8 +433,9 @@ function App() {
               html`<option key=${k} value=${k}>${v.label}</option>`)}
           </select>
           <div class="note">Flags each candidate as keep or junk (carbon / ice / aggregate) and removes it
-            from the kept set. LightGBM is the robust default; RandomForest, SGD (online), and the CNN are
-            alternatives. All numbers are held-out (no in-sample inflation).</div>
+            from the kept set, lifting purity while keeping the real particles. LightGBM is the robust
+            default; RandomForest, SGD (online), and the CNN are alternatives. Scoreboard is in-sample on
+            these micrographs; held-out generalisation is more conservative.</div>
         </div>
 
         <div class="divider"></div>
