@@ -75,10 +75,11 @@ def _to_polar(img: np.ndarray, n_r: int = 36, n_theta: int = 72) -> np.ndarray:
     return map_coordinates(img, [c + R * np.sin(TH), c + R * np.cos(TH)], order=1)
 
 
-def _best_angle_bin(img_polar: np.ndarray, ref_polar: np.ndarray) -> int:
-    cc = np.fft.ifft(np.fft.fft(img_polar, axis=1) * np.conj(np.fft.fft(ref_polar, axis=1)),
-                     axis=1).real.sum(axis=0)
-    return int(np.argmax(cc))
+def _best_angle_bin(img_polar_f: np.ndarray, ref_polar: np.ndarray) -> tuple[int, float]:
+    """Best rotation bin + score. `img_polar_f` is the pre-computed FFT of the polar image."""
+    cc = np.fft.ifft(img_polar_f * np.conj(np.fft.fft(ref_polar, axis=1)), axis=1).real.sum(axis=0)
+    k = int(np.argmax(cc))
+    return k, float(cc[k])
 
 
 def _phase_shift(img: np.ndarray, ref: np.ndarray) -> tuple[float, float, float]:
@@ -98,14 +99,6 @@ def _apply(img: np.ndarray, ang: float, shift) -> np.ndarray:
     if shift[0] or shift[1]:
         out = np.fft.ifftn(fourier_shift(np.fft.fftn(out), shift)).real
     return out
-
-
-def _align(crop_polar, crop_bp, ref_polar, ref_bp, n_theta):
-    b = _best_angle_bin(crop_polar, ref_polar)
-    ang = -b * 360.0 / n_theta
-    r = _apply(crop_bp, ang, (0, 0))
-    dy, dx, score = _phase_shift(r, ref_bp)
-    return ang, (dy, dx), score
 
 
 def _rot_invariant_features(crops_bp, n_theta=72):
@@ -148,36 +141,40 @@ def classify_2d(crops: np.ndarray, n_classes: int = 8, n_iter: int = 12,
     idx = _kmeanspp(pca, k, np.random.default_rng(seed))
     refs = crops[idx].copy()
 
-    polars = None
     labels = np.zeros(n, int)
     counts = np.zeros(k, int)
     for it in range(n_iter):
         lp = max(3.0 - 2.0 * it / max(n_iter - 1, 1), 1.0)        # anneal: coarse→fine
         crops_bp = np.stack([_bandpass(c, lp) for c in crops]) * mask
-        polars = [_to_polar(c, n_theta=n_theta) for c in crops_bp]
+        polar_f = [np.fft.fft(_to_polar(c, n_theta=n_theta), axis=1) for c in crops_bp]
         refs_bp = np.stack([_bandpass(r, lp) for r in refs]) * mask
         ref_polars = [_to_polar(r, n_theta=n_theta) for r in refs_bp]
 
-        bk = np.zeros(n, int); bang = np.zeros(n); bsh = np.zeros((n, 2)); bscore = np.zeros(n)
+        # E-step: assign class by cheap rotational cross-correlation (no Cartesian rotate)
+        bk = np.zeros(n, int); bang = np.zeros(n); bscore = np.zeros(n)
         for i in range(n):
-            best_j, best_s, ba, bs = 0, -1e30, 0.0, (0.0, 0.0)
+            best_j, best_s, best_b = 0, -1e30, 0
             for j in range(k):
-                ang, sh, score = _align(polars[i], crops_bp[i], ref_polars[j], refs_bp[j], n_theta)
-                if score > best_s:
-                    best_s, best_j, ba, bs = score, j, ang, sh
-            bk[i], bang[i], bsh[i], bscore[i] = best_j, ba, bs, best_s
+                b, sc = _best_angle_bin(polar_f[i], ref_polars[j])
+                if sc > best_s:
+                    best_s, best_j, best_b = sc, j, b
+            bk[i] = best_j
+            bang[i] = -best_b * 360.0 / n_theta
+            bscore[i] = best_s
         labels = bk
 
+        # M-step: rotate + translate (phase correlation) each member ONCE, then average
         new = np.zeros_like(refs); counts = np.zeros(k, int)
         for j in range(k):
             members = np.where(bk == j)[0]
             if len(members) == 0:
                 continue
             if len(members) >= 8:        # outlier rejection: drop lowest-scoring 15%
-                thr = np.quantile(bscore[members], 0.15)
-                members = members[bscore[members] >= thr]
+                members = members[bscore[members] >= np.quantile(bscore[members], 0.15)]
             for i in members:
-                new[j] += _apply(crops[i], bang[i], bsh[i])
+                rc = _apply(crops[i], bang[i], (0, 0))               # rotate the original
+                dy, dx, _ = _phase_shift(_bandpass(rc, lp) * mask, refs_bp[j])
+                new[j] += _apply(rc, 0.0, (dy, dx))
             counts[j] = len(members)
             refs[j] = new[j] / max(counts[j], 1)
 
