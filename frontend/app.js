@@ -11,6 +11,8 @@ function Viewer({ empiar, stem, picks, factor, brush, tool, onCorrect }) {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
   const imgRef = useRef(new Image());
+  const baseRef = useRef(null);          // offscreen layer: image + all pick circles (static during drag)
+  const rafRef = useRef(0);
   const view = useRef({ z: 1, ox: 0, oy: 0 });
   const drag = useRef(null);
   const R = Math.max(6, Math.round((108 / factor) / 2));
@@ -35,22 +37,34 @@ function Viewer({ empiar, stem, picks, factor, brush, tool, onCorrect }) {
     applyStyle();
   };
 
-  const draw = (sel) => {
-    const cv = canvasRef.current, img = imgRef.current;
-    if (!cv || !img.complete || !img.naturalWidth) return;
-    cv.width = img.naturalWidth; cv.height = img.naturalHeight;
-    const ctx = cv.getContext('2d');
-    ctx.drawImage(img, 0, 0);
-    const lw = 1.4 / Math.max(view.current.z, 1);
+  // Render the image + every pick circle to the offscreen base ONCE (on image/picks change).
+  const renderBase = () => {
+    const img = imgRef.current;
+    if (!img.complete || !img.naturalWidth) return;
+    if (!baseRef.current) baseRef.current = document.createElement('canvas');
+    const base = baseRef.current;
+    base.width = img.naturalWidth; base.height = img.naturalHeight;
+    const bx = base.getContext('2d');
+    bx.drawImage(img, 0, 0);
     if (picks) {
-      ctx.lineWidth = lw;
+      bx.lineWidth = 1.4;
       for (let i = 0; i < picks.x.length; i++) {
         const junk = picks.junk[i];
-        ctx.strokeStyle = junk ? 'rgba(229,72,77,.85)' : 'rgba(41,195,147,.95)';
-        ctx.beginPath(); ctx.arc(picks.x[i], picks.y[i], junk ? R * 0.7 : R, 0, 6.2832); ctx.stroke();
+        bx.strokeStyle = junk ? 'rgba(229,72,77,.85)' : 'rgba(41,195,147,.95)';
+        bx.beginPath(); bx.arc(picks.x[i], picks.y[i], junk ? R * 0.7 : R, 0, 6.2832); bx.stroke();
       }
     }
+  };
+  // Blit the static base + draw only the selection rectangle (cheap, O(1) — used during drag).
+  const blit = (sel) => {
+    const cv = canvasRef.current, base = baseRef.current;
+    if (!cv || !base || !base.width) return;
+    if (cv.width !== base.width) { cv.width = base.width; cv.height = base.height; }
+    const ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.drawImage(base, 0, 0);
     if (sel) {
+      const lw = 1.5 / Math.max(view.current.z, 1);
       ctx.strokeStyle = brush === 'keep' ? '#29c393' : '#e5484d';
       ctx.fillStyle = brush === 'keep' ? 'rgba(41,195,147,.12)' : 'rgba(229,72,77,.12)';
       ctx.lineWidth = lw; ctx.setLineDash([5, 4]);
@@ -60,6 +74,7 @@ function Viewer({ empiar, stem, picks, factor, brush, tool, onCorrect }) {
       ctx.setLineDash([]);
     }
   };
+  const draw = (sel) => { renderBase(); blit(sel); };  // full redraw (image/picks changed)
 
   useEffect(() => {
     const img = imgRef.current;
@@ -90,11 +105,12 @@ function Viewer({ empiar, stem, picks, factor, brush, tool, onCorrect }) {
       d.x = e.clientX; d.y = e.clientY; applyStyle(); return; }
     const p = imgCoord(e); d.x1 = p.x; d.y1 = p.y;
     if (Math.abs(p.x - d.x0) + Math.abs(p.y - d.y0) > 4 / view.current.z) d.moved = true;
-    draw(d);
+    if (!rafRef.current) rafRef.current = requestAnimationFrame(() => { rafRef.current = 0; blit(drag.current); });
   };
   const onUp = () => {
     const d = drag.current; drag.current = null;
-    if (!d || d.pan || !picks) { draw(); return; }
+    if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; }
+    if (!d || d.pan || !picks) { blit(); return; }
     const lo = { x: Math.min(d.x0, d.x1), y: Math.min(d.y0, d.y1) };
     const hi = { x: Math.max(d.x0, d.x1), y: Math.max(d.y0, d.y1) };
     let sel = [];
@@ -110,7 +126,7 @@ function Viewer({ empiar, stem, picks, factor, brush, tool, onCorrect }) {
       if (best >= 0 && bd < (R * 2.5) ** 2) sel = [best];
     }
     if (sel.length) onCorrect(sel, brush);
-    draw();
+    blit();   // clear the selection rect now; new picks (from onCorrect) re-render via the picks effect
   };
 
   return html`<div class="canvas-wrap" ref=${wrapRef}
