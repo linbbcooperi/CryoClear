@@ -105,3 +105,24 @@ input[type=range] { width: 100%; accent-color: var(--primary); }
 .tag { font-family: var(--mono); }
 .note { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
 .divider { height: 1px; background: var(--border); margin: 14px -14px; }
+
+/* section header with an info affordance: title left, ℹ right */
+.ghead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; gap: 8px; }
+.ghead h4 { margin: 0; }
+.info { position: relative; display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--border); flex: none;
+  color: var(--muted); font: italic 600 10px var(--sans); cursor: help;
+  user-select: none; outline: none; transition: .12s; }
+.info:hover, .info:focus-visible { color: var(--heading); border-color: var(--primary); }
+.info .tip { position: absolute; top: calc(100% + 7px); right: -2px; width: 270px;
+  background: var(--panel2); border: 1px solid var(--border); border-radius: 9px; padding: 10px 12px;
+  font: 400 11.5px/1.5 var(--sans); letter-spacing: 0; text-transform: none;
+  color: var(--text); text-align: left; box-shadow: 0 10px 30px rgba(0,0,0,.55);
+  opacity: 0; visibility: hidden; transform: translateY(-4px); transition: opacity .13s, transform .13s;
+  z-index: 60; pointer-events: none; white-space: normal; }
+.info .tip::before { content: ''; position: absolute; top: -5px; right: 4px; width: 9px; height: 9px;
+  background: var(--panel2); border-left: 1px solid var(--border); border-top: 1px solid var(--border);
+  transform: rotate(45deg); }
+.info:hover .tip, .info:focus .tip, .info:focus-within .tip {
+  opacity: 1; visibility: visible; transform: translateY(0); }
+.info .tip b { color: var(--heading); font-weight: 600; }

@@ -173,6 +173,13 @@ function Metric({ k, v, d, big }) {
     ${d ? html`<div class=${'d ' + (d.up ? 'up' : 'down')}>${d.t}</div>` : null}</div>`;
 }
 
+// section header with a hover/focus info tooltip — keeps the panel free of inline note slop
+function Head({ title, info }) {
+  return html`<div class="ghead"><h4>${title}</h4>
+    ${info ? html`<span class="info" tabindex="0" aria-label=${title + ' — info'}>i<span class="tip">${info}</span></span>` : null}
+  </div>`;
+}
+
 // ---------------------------------------------------------------- app
 function App() {
   const [info, setInfo] = useState(null);
@@ -404,7 +411,9 @@ function App() {
 
       <div class="side">
         <div class="group">
-          <h4>Scoreboard — kept particles vs CryoPPP ground truth</h4>
+          <${Head} title="Scoreboard" info=${html`<b>Kept particles vs CryoPPP ground truth.</b> Kept-set
+            purity = the fraction of kept picks that are real particles; triage lifts it above raw picks.
+            Numbers are in-sample on the shown micrographs — held-out generalisation is more conservative.`} />
           <div class="cards">
             <${Metric} big k="Kept-set purity (precision)" v=${pa ? (pa.precision * 100).toFixed(0) + '%' : '—'}
               d=${pa && pb ? { up: pa.precision >= pb.precision, t: (pa.precision - pb.precision >= 0 ? '+' : '') + ((pa.precision - pb.precision) * 100).toFixed(0) + ' pts vs raw picks' } : null} />
@@ -423,7 +432,8 @@ function App() {
 
         <div class="divider"></div>
         <div class="group">
-          <h4>Junk threshold</h4>
+          <${Head} title="Junk threshold" info=${html`Picks with junk-probability above this are removed.
+            Lower = stricter (cleaner stack, fewer kept). Each classifier snaps to its calibrated default.`} />
           <div class="row between"><span class="lbl">keep if junk-prob &lt; ${threshold.toFixed(2)}</span></div>
           <input type="range" min="0.1" max="0.95" step="0.05" value=${threshold}
              onChange=${e => changeTh(parseFloat(e.target.value))} />
@@ -431,48 +441,42 @@ function App() {
 
         <div class="divider"></div>
         <div class="group">
-          <h4>Picker</h4>
+          <${Head} title="Picker" info=${html`Switching picker keeps the <b>same micrograph</b>, so the
+            differences are clear. The junk classifier then triages whichever picker you choose — blob,
+            Topaz or CryoSegNet.`} />
           <select value=${picker} onChange=${e => switchPicker(e.target.value)}>
             ${Object.entries(info.picker_menu || { blob: { label: 'Blob LoG', device: 'CPU', ready: true } })
         .filter(([k, m]) => m.ready).map(([k, m]) =>
           html`<option key=${k} value=${k}>${m.label} · ${m.device}</option>`)}
           </select>
-          <div class="note">${(info.pickers || []).length > 1
-            ? 'Switching picker keeps the same micrograph, so the differences are clear. The junk classifier then triages whichever picker you choose.'
-            : 'Only the blob picker is cached for this dataset. Topaz / CryoSegNet are wired but cached only where you see them in the menu.'}</div>
         </div>
 
         <div class="divider"></div>
         <div class="group">
-          <h4>Junk classifier</h4>
+          <${Head} title="Junk classifier" info=${html`Flags each candidate keep or junk
+            (carbon / ice / aggregate) and removes it, lifting purity while keeping real particles.
+            <b>LightGBM</b> is the robust default; RandomForest, SGD (online) and the CNN are alternatives.`} />
           <select value=${clfModel} disabled=${mode === 'learn'} onChange=${e => switchClf(e.target.value)}>
             ${Object.entries(info.clf_options).map(([k, v]) =>
               html`<option key=${k} value=${k}>${v.label}</option>`)}
           </select>
-          <div class="note">Flags each candidate as keep or junk (carbon / ice / aggregate) and removes it
-            from the kept set, lifting purity while keeping the real particles. LightGBM is the robust
-            default; RandomForest, SGD (online), and the CNN are alternatives. Scoreboard is in-sample on
-            these micrographs; held-out generalisation is more conservative.</div>
         </div>
 
         <div class="divider"></div>
         <div class="group">
-          <h4>Learning mode</h4>
+          <${Head} title="Learning mode" info=${html`<b>Trained model:</b> pre-fit junk classifier; your
+            dump/keep corrections override individual particles instantly. <b>Active-learning:</b> cold-start
+            junk-blind, and junk-rejection F1 climbs as you correct. <b>Show uncertain</b> highlights (amber)
+            the candidates the model is least sure about — correcting those teaches it fastest.`} />
           <div class="row">
             <button class=${mode === 'model' ? 'primary sm' : 'sm'} onClick=${() => switchMode('model')}>Trained model</button>
             <button class=${mode === 'learn' ? 'primary sm' : 'sm'} onClick=${() => switchMode('learn')}>Active-learning</button>
             <button class="sm" onClick=${reset}>Reset</button>
           </div>
-          <div class="note">${mode === 'learn'
-            ? 'Cold-start: the model starts junk-blind. Dump/keep particles and the junk-rejection F1 climbs as it learns.'
-            : 'Pre-trained junk classifier. Your dump/keep corrections override individual particles instantly.'}</div>
           <div class="row" style=${{ marginTop: '8px' }}>
             <button class=${'sm' + (showUncertain ? ' primary' : '')} onClick=${() => setShowUncertain(v => !v)}>
               ${showUncertain ? 'Hide' : 'Show'} uncertain (${nUncertain})</button>
           </div>
-          <div class="note">Guided active learning: amber rings = candidates the model is least sure about
-            (junk-prob near the threshold). Correcting <i>these</i> teaches it fastest — most tools make you
-            hunt; we surface the highest-value corrections.</div>
           ${f1hist.length > 1 ? html`<${Plot} h=${130}
             data=${[{ type: 'scatter', mode: 'lines+markers', y: f1hist, line: { color: '#38bdf8' } }]}
             layout=${{ yaxis: { range: [0, 1], title: 'junk-F1' }, xaxis: { title: 'corrections' } }} />` : null}
@@ -480,7 +484,8 @@ function App() {
 
         <div class="divider"></div>
         <div class="group">
-          <h4>Real-time stream</h4>
+          <${Head} title="Real-time stream" info=${html`Feeds micrographs on a timer with a live %junk
+            timeline — the streaming-microscope scenario, triaged as data arrives.`} />
           <div class="row">
             <button class=${streaming ? 'sm junk active' : 'primary sm'} onClick=${toggleStream}>${streaming ? 'Stop stream' : 'Start stream'}</button>
           </div>
@@ -491,7 +496,8 @@ function App() {
 
         <div class="divider"></div>
         <div class="group">
-          <h4>Export</h4>
+          <${Head} title="Export" info=${html`<b>.star / .box</b> = kept-particle coordinates for RELION
+            &amp; cryoSPARC; <b>PNG / JPEG</b> = overlay snapshot; <b>PDF</b> = honest scorecard.`} />
           <div class="row" style=${{ flexWrap: 'wrap' }}>
             <button class="sm" onClick=${() => window.open(`/api/export/coords/${empiar}/${stem}?fmt=star`)}>.star</button>
             <button class="sm" onClick=${() => window.open(`/api/export/coords/${empiar}/${stem}?fmt=box`)}>.box</button>
@@ -499,17 +505,16 @@ function App() {
             <button class="sm" onClick=${() => savePng('image/jpeg')}>JPEG</button>
             <button class="sm" onClick=${() => window.open(`/api/export/report/${empiar}`)}>PDF report</button>
           </div>
-          <div class="note">.star / .box = kept-particle coordinates for RELION &amp; cryoSPARC;
-            PNG/JPEG = overlay snapshot; PDF = honest scorecard.</div>
         </div>
 
         <div class="divider"></div>
         <div class="group">
-          <h4>2D class averages (kept particles)</h4>
+          <${Head} title="2D class averages" info=${html`Reference-free 2D classification of the
+            <b>kept</b> particles. Coherent protein density in the averages = the picks are real.`} />
           <button class="sm" onClick=${run2d} disabled=${busy2d}>${busy2d ? 'Classifying…' : 'Compute 2D classes'}</button>
           ${classes ? html`<div class="montage">${classes.classes.map((c, i) =>
             html`<figure key=${i}><img src=${c.png} /><figcaption>${c.count} ptcls</figcaption></figure>`)}</div>
-            <div class="note">${classes.n_particles} kept particles → coherent protein density = real picks.</div>` : null}
+            <div class="note">${classes.n_particles} kept particles classified.</div>` : null}
         </div>
       </div>
     </div>
