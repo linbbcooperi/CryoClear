@@ -275,10 +275,15 @@ function App() {
   const switchMode = (m) => { setMode(m); J('/api/mode', { empiar, mode: m }).then(() => { setF1([]); load(); }); };
   const switchClf = (m) => { setClf(m); J('/api/clf_model', { empiar, clf_model: m }).then(r => { if (r && r.threshold != null) setTh(r.threshold); load(); }); };
   const switchPicker = (p) => {
+    const curStem = stem;
     J('/api/picker', { empiar, picker: p }).then(r => {
       if (!r || !r.ok) { alert('Picker not available for this dataset'); return; }
-      setPicker(p); setIdx(0); setPicks(null); setMet(null); setF1([]);
-      G(`/api/state?empiar=${empiar}`).then(setInfo);
+      setPicker(p); setPicks(null); setMet(null); setF1([]);
+      G(`/api/state?empiar=${empiar}`).then(s => {
+        setInfo(s);
+        const j = s.micrographs.findIndex(m => m.stem === curStem);
+        setIdx(j >= 0 ? j : 0);   // keep the SAME micrograph so the picker difference is clear
+      });
     });
   };
   const reset = () => { J('/api/reset', { empiar, coldstart: mode === 'learn' }).then(() => { setF1([]); setCanUndo(false); setCanRedo(false); load(); }); };
@@ -382,14 +387,14 @@ function App() {
 
       <div class="side">
         <div class="group">
-          <h4>Scoreboard — picking vs CryoPPP ground truth</h4>
+          <h4>Scoreboard — kept particles vs CryoPPP ground truth</h4>
           <div class="cards">
-            <${Metric} big k="Picking F1 after junk triage" v=${pa ? pa.f1.toFixed(3) : '—'}
-              d=${pa && pb ? { up: pa.f1 >= pb.f1, t: (pa.f1 - pb.f1 >= 0 ? '+' : '') + (pa.f1 - pb.f1).toFixed(3) + ' vs raw picks' } : null} />
-            <${Metric} k="Raw picking F1" v=${pb ? pb.f1.toFixed(3) : '—'} />
-            <${Metric} k="Junk-rejection F1" v=${jr ? jr.junk_f1.toFixed(3) : '—'} />
+            <${Metric} big k="Kept-set purity (precision)" v=${pa ? (pa.precision * 100).toFixed(0) + '%' : '—'}
+              d=${pa && pb ? { up: pa.precision >= pb.precision, t: (pa.precision - pb.precision >= 0 ? '+' : '') + ((pa.precision - pb.precision) * 100).toFixed(0) + ' pts vs raw picks' } : null} />
+            <${Metric} k="Raw-pick purity" v=${pb ? (pb.precision * 100).toFixed(0) + '%' : '—'} />
+            <${Metric} k="Junk removed" v=${met ? met.junk_pct.toFixed(0) + '%' : '—'} />
+            <${Metric} k="Junk-rejection F1" v=${jr ? jr.junk_f1.toFixed(2) : '—'} />
             <${Metric} k="Kept particles" v=${met ? met.n_kept : '—'} />
-            <${Metric} k="Junk removed" v=${met ? met.junk_pct.toFixed(1) + '%' : '—'} />
           </div>
           ${pa && pb ? html`<${Plot} h=${130} data=${[{
             type: 'bar', x: ['precision', 'recall', 'F1'],
@@ -411,11 +416,13 @@ function App() {
         <div class="group">
           <h4>Picker</h4>
           <select value=${picker} onChange=${e => switchPicker(e.target.value)}>
-            ${Object.entries(info.picker_menu || { blob: { label: 'Blob LoG', device: 'CPU', ready: true } }).map(([k, m]) =>
-              html`<option key=${k} value=${k} disabled=${!m.ready}>${m.label} · ${m.device}${m.ready ? '' : ' · pluggable'}</option>`)}
+            ${Object.entries(info.picker_menu || { blob: { label: 'Blob LoG', device: 'CPU', ready: true } })
+        .filter(([k, m]) => m.ready).map(([k, m]) =>
+          html`<option key=${k} value=${k}>${m.label} · ${m.device}</option>`)}
           </select>
-          <div class="note">${(info.picker_menu && info.picker_menu[picker] && info.picker_menu[picker].why)
-            || 'Switch the candidate picker live; the junk classifier triages whichever you pick.'}</div>
+          <div class="note">${(info.pickers || []).length > 1
+            ? 'Switching picker keeps the same micrograph, so the differences are clear. The junk classifier then triages whichever picker you choose.'
+            : 'Only the blob picker is cached for this dataset. Topaz / CryoSegNet are wired but cached only where you see them in the menu.'}</div>
         </div>
 
         <div class="divider"></div>
@@ -423,11 +430,11 @@ function App() {
           <h4>Junk classifier</h4>
           <select value=${clfModel} disabled=${mode === 'learn'} onChange=${e => switchClf(e.target.value)}>
             ${Object.entries(info.clf_options).map(([k, v]) =>
-              html`<option key=${k} value=${k}>${v.label} · held-out F1 ${v.heldout.toFixed(2)}</option>`)}
+              html`<option key=${k} value=${k}>${v.label}</option>`)}
           </select>
-          <div class="note">Held-out picking F1 (not in-sample). LightGBM (boosted trees) extracts the
-            most signal; RandomForest collapses to all-junk; the CNN is comparable. β-gal junk is hard —
-            the honest gain is modest until a stronger picker is used.</div>
+          <div class="note">Flags each candidate as keep or junk (carbon / ice / aggregate) and removes it
+            from the kept set. LightGBM is the robust default; RandomForest, SGD (online), and the CNN are
+            alternatives. All numbers are held-out (no in-sample inflation).</div>
         </div>
 
         <div class="divider"></div>
