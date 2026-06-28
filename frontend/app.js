@@ -293,7 +293,12 @@ function App() {
       G(`/api/state?empiar=${empiar}`).then(s => {
         setInfo(s);
         const j = s.micrographs.findIndex(m => m.stem === curStem);
-        setIdx(j >= 0 ? j : 0);   // keep the SAME micrograph so the picker difference is clear
+        const ns = j >= 0 ? j : 0;
+        setIdx(ns);   // keep the SAME micrograph so the picker difference is clear
+        // reload picks explicitly: the load() effect won't fire if stem+picker are unchanged
+        // (e.g. re-selecting the current picker), which would leave the canvas blank.
+        const st = (s.micrographs[ns] || {}).stem;
+        if (st) { G(`/api/picks/${empiar}/${st}`).then(setPicks); G(`/api/metrics/${empiar}/${st}`).then(setMet); }
       });
     });
   };
