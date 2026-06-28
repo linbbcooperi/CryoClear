@@ -522,13 +522,19 @@ def api_metrics(empiar: str, stem: str):
 def api_classify2d(payload: dict):
     s = get_state(payload.get("empiar"))
     from cryoclear import class2d, io_mrc
-    max_particles = int(payload.get("max_particles", 900))
+    max_particles = int(payload.get("max_particles", 1500))
     crops_all, n = [], 0
     for info in s.index["micrographs"]:
         stem = info["stem"]
         mic = config.RAW / s.empiar / "micrographs" / f"{stem}.mrc"
         d = s.npz(stem)
-        kept = d["pred_full"][~s.junk_mask(stem)]
+        junk = s.junk_mask(stem)
+        sc = s.scores(stem)
+        # 2D wants the PUREST input: high-confidence kept particles (lowest junk prob) first,
+        # so background contamination doesn't smear the class averages.
+        keep_idx = np.where(~junk)[0]
+        keep_idx = keep_idx[np.argsort(sc[keep_idx])]            # most-confident first
+        kept = d["pred_full"][keep_idx]
         imgf = io_mrc.normalize_8bit(io_mrc.load_mrc(mic))
         crops_all.append(class2d.extract_particles(imgf, kept, box=160, out_size=96))
         n += len(crops_all[-1])
