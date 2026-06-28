@@ -34,21 +34,34 @@ def pick(image: np.ndarray, backend: str = "blob", **kwargs) -> np.ndarray:
     raise ValueError(f"unknown backend: {backend}")
 
 
-def _blob_pick(image: np.ndarray, min_sigma: float = 4, max_sigma: float = 12,
-               threshold: float = 0.02) -> np.ndarray:
-    """Placeholder blob detector (Laplacian-of-Gaussian). Replace with a real picker.
+def _blob_pick(image: np.ndarray, particle_px: float = 27.0, threshold_rel: float = 0.16,
+               min_distance: float | None = None, max_peaks: int = 2200) -> np.ndarray:
+    """Band-pass (Difference-of-Gaussians) blob detector with non-max suppression.
 
-    Good enough to produce candidate boxes so the UI/metrics/junk pipeline runs.
+    A LoG with a permissive threshold fires on every texture variation → a dense,
+    non-human over-pick field. This instead band-passes the image to the particle
+    scale (suppressing large-scale carbon gradients and pixel noise), then takes
+    spaced local maxima (min_distance NMS, particles don't overlap). The result is
+    distinct, particle-like candidates — still deliberately over-picking (~2x GT) so
+    the junk classifier has something to triage, but no longer a uniform blanket.
+
+    ``particle_px`` is the particle diameter in *this image's* pixels (the display
+    image is downsampled by io_mrc factor, so ~108/4 ≈ 27 px for β-gal).
     """
-    from skimage.feature import blob_log
+    from scipy.ndimage import gaussian_filter
+    from skimage.feature import peak_local_max
 
     img = image.astype(float)
     img = (img - img.min()) / (np.ptp(img) + 1e-6)  # np.ptp: ndarray.ptp() removed in NumPy 2.0
-    blobs = blob_log(img, min_sigma=min_sigma, max_sigma=max_sigma, threshold=threshold)
-    if blobs.size == 0:
+    sigma = max(particle_px / 4.0, 1.5)
+    dog = gaussian_filter(img, sigma) - gaussian_filter(img, sigma * 1.6)
+    resp = np.abs(dog)                              # particle blobs (dark or bright) → strong |DoG|
+    md = int(min_distance if min_distance is not None else max(particle_px * 0.55, 4))
+    pk = peak_local_max(resp, min_distance=md, threshold_rel=threshold_rel, num_peaks=max_peaks)
+    if pk.size == 0:
         return np.zeros((0, 2))
-    # blob_log returns (row, col, sigma) -> (x, y) = (col, row)
-    return np.stack([blobs[:, 1], blobs[:, 0]], axis=1)
+    # peak_local_max returns (row, col) -> (x, y) = (col, row)
+    return np.stack([pk[:, 1], pk[:, 0]], axis=1).astype(float)
 
 
 def _cryosegnet_pick(
