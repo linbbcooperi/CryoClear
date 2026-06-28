@@ -43,13 +43,15 @@ class State:
         self.factor = self.index["factor"]
         self.radius = self.index["radius"]
         self.threshold = 0.5
+        self.mode = "model"               # "model"=precomputed scores | "learn"=live cold-start AL
         self._npz: dict[str, dict] = {}
+        self.overrides: dict[str, dict] = {}   # {stem: {idx: label}} manual HITL corrections
         self.learner = ActiveLearner(JunkClassifier())
-        self.coldstart = False
+        self.coldstart = True
         self.corrections = 0
         self.f1_history: list[float] = []
         self.seen: list[str] = []         # streamed micrograph order (cumulative metrics)
-        self._seed_learner(coldstart=False)
+        self._seed_learner(coldstart=True)  # fast cold seed; only used in 'learn' mode
 
     # ---- model / learner ----
     def _train_table(self):
@@ -83,10 +85,19 @@ class State:
         return self._npz[stem]
 
     def scores(self, stem: str) -> np.ndarray:
-        feats = self.npz(stem)["feats"]
-        if len(feats) == 0:
-            return np.zeros(0)
-        return np.asarray(self.learner.clf.predict_junk_proba(feats))
+        d = self.npz(stem)
+        if self.mode == "learn":
+            feats = d["feats"]
+            return (np.asarray(self.learner.clf.predict_junk_proba(feats))
+                    if len(feats) else np.zeros(0))
+        return d["scores"]   # precomputed saved-model scores (instant)
+
+    def junk_mask(self, stem: str) -> np.ndarray:
+        junk = self.scores(stem) >= self.threshold
+        for i, lab in self.overrides.get(stem, {}).items():
+            if 0 <= int(i) < len(junk):
+                junk[int(i)] = bool(lab)
+        return junk
 
     # ---- metrics from cached true labels ----
     def picking(self, stem: str, kept_mask: np.ndarray):
@@ -134,9 +145,19 @@ def api_picks(empiar: str, stem: str):
     s = get_state(empiar)
     d = s.npz(stem)
     pd = d["pred_disp"]
-    sc = s.scores(stem)
     return {"stem": stem, "x": pd[:, 0].tolist(), "y": pd[:, 1].tolist(),
-            "score": sc.tolist(), "true_junk": d["true_junk"].tolist()}
+            "score": s.scores(stem).tolist(), "junk": s.junk_mask(stem).astype(int).tolist(),
+            "true_junk": d["true_junk"].tolist()}
+
+
+@app.post("/api/mode")
+def api_mode(payload: dict):
+    s = get_state(payload.get("empiar"))
+    s.mode = payload.get("mode", "model")
+    if s.mode == "learn":
+        s._seed_learner(coldstart=True)
+        s.overrides = {}
+    return {"mode": s.mode}
 
 
 @app.post("/api/correct")
@@ -144,20 +165,28 @@ async def api_correct(payload: dict):
     s = get_state(payload.get("empiar"))
     stem = payload["stem"]
     feats = s.npz(stem)["feats"]
-    dump = [i for i in payload.get("dump_idx", []) if 0 <= i < len(feats)]
-    keep = [i for i in payload.get("keep_idx", []) if 0 <= i < len(feats)]
-    if dump:
-        s.learner.add_corrections(feats[dump], np.ones(len(dump), int))
-    if keep:
-        s.learner.add_corrections(feats[keep], np.zeros(len(keep), int))
+    dump = [int(i) for i in payload.get("dump_idx", []) if 0 <= int(i) < len(feats)]
+    keep = [int(i) for i in payload.get("keep_idx", []) if 0 <= int(i) < len(feats)]
+    if s.mode == "learn":   # corrections retrain the live model (the climb demo)
+        if dump:
+            s.learner.add_corrections(feats[dump], np.ones(len(dump), int))
+        if keep:
+            s.learner.add_corrections(feats[keep], np.zeros(len(keep), int))
+    else:                   # model mode: manual per-particle overrides (instant)
+        ov = s.overrides.setdefault(stem, {})
+        for i in dump:
+            ov[i] = 1
+        for i in keep:
+            ov[i] = 0
     s.corrections += len(dump) + len(keep)
-    sc = s.scores(stem)
-    kept = sc < s.threshold
-    if (s.npz(stem)["true_junk"] != -1).any():
-        jr = metrics.junk_rejection_metrics(sc >= s.threshold, s.npz(stem)["true_junk"] == 1)
+    junk = s.junk_mask(stem)
+    d = s.npz(stem)
+    if (d["true_junk"] != -1).any():
+        jr = metrics.junk_rejection_metrics(junk, d["true_junk"] == 1)
         s.f1_history.append(jr["junk_f1"])
-    return {"stem": stem, "score": sc.tolist(), "corrections": s.corrections,
-            "f1_history": s.f1_history, "picking_after": s.picking(stem, kept)}
+    return {"stem": stem, "score": s.scores(stem).tolist(),
+            "junk": junk.astype(int).tolist(), "corrections": s.corrections,
+            "f1_history": s.f1_history, "picking_after": s.picking(stem, ~junk)}
 
 
 @app.post("/api/threshold")
@@ -177,10 +206,9 @@ def api_reset(payload: dict):
 @app.get("/api/metrics/{empiar}/{stem}")
 def api_metrics(empiar: str, stem: str):
     s = get_state(empiar)
-    sc = s.scores(stem)
-    junk = sc >= s.threshold
+    junk = s.junk_mask(stem)
     d = s.npz(stem)
-    n = len(sc)
+    n = len(junk)
     out = {"stem": stem, "n_candidates": n, "n_kept": int((~junk).sum()),
            "junk_pct": float(100 * junk.mean()) if n else 0.0,
            "picking_before": s.picking(stem, np.ones(n, bool)),
@@ -200,7 +228,7 @@ def api_classify2d(payload: dict):
         stem = info["stem"]
         mic = config.RAW / s.empiar / "micrographs" / f"{stem}.mrc"
         d = s.npz(stem)
-        kept = d["pred_full"][s.scores(stem) < s.threshold]
+        kept = d["pred_full"][~s.junk_mask(stem)]
         imgf = io_mrc.normalize_8bit(io_mrc.load_mrc(mic))
         crops_all.append(class2d.extract_particles(imgf, kept, box=160, out_size=64))
         n += len(crops_all[-1])
@@ -234,11 +262,10 @@ async def ws_stream(ws: WebSocket):
         while True:
             stem = mics[i % len(mics)]
             s.seen.append(stem)
-            sc = s.scores(stem)
-            junk = sc >= s.threshold
+            junk = s.junk_mask(stem)
             await ws.send_json({"stem": stem, "i": i, "n_kept": int((~junk).sum()),
-                                "n_candidates": int(len(sc)),
-                                "junk_pct": float(100 * junk.mean()) if len(sc) else 0.0})
+                                "n_candidates": int(len(junk)),
+                                "junk_pct": float(100 * junk.mean()) if len(junk) else 0.0})
             i += 1
             await asyncio.sleep(speed)
     except WebSocketDisconnect:
