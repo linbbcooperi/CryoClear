@@ -159,6 +159,8 @@ function App() {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [datasets, setDatasets] = useState([]);
+  const [selEmpiar, setSelEmpiar] = useState(null);
   const [f1hist, setF1] = useState([]);
   const [classes, setClasses] = useState(null);
   const [busy2d, setBusy2d] = useState(false);
@@ -170,7 +172,18 @@ function App() {
   const mic = info && info.micrographs[idx];
   const stem = mic && mic.stem;
 
-  useEffect(() => { G('/api/state').then(s => { setInfo(s); setTh(s.threshold); setClf(s.clf_model); }); }, []);
+  useEffect(() => {
+    G('/api/datasets').then(d => {
+      const ds = (d.datasets || []).filter(x => x.ready);
+      setDatasets(ds);
+      setSelEmpiar(((ds.find(x => x.empiar === '10017') || ds[0]) || {}).empiar || '10017');
+    });
+  }, []);
+  useEffect(() => {
+    if (!selEmpiar) return;
+    setInfo(null); setPicks(null); setMet(null); setIdx(0); setF1([]); setClasses(null);
+    G(`/api/state?empiar=${selEmpiar}`).then(s => { setInfo(s); setTh(s.threshold); setClf(s.clf_model); });
+  }, [selEmpiar]);
 
   const load = useCallback(() => {
     if (!empiar || !stem) return;
@@ -209,7 +222,7 @@ function App() {
       .then(r => r.json()).then(r => {
         setUploading(false);
         if (!r.ok) { alert('Upload failed: ' + (r.error || 'unknown')); return; }
-        G('/api/state').then(s => { setInfo(s); const j = s.micrographs.findIndex(m => m.stem === r.stem); if (j >= 0) setIdx(j); });
+        G(`/api/state?empiar=${empiar}`).then(s => { setInfo(s); const j = s.micrographs.findIndex(m => m.stem === r.stem); if (j >= 0) setIdx(j); });
       }).catch(e => { setUploading(false); alert('Upload error: ' + e); });
   };
 
@@ -265,7 +278,10 @@ function App() {
       <div class="brand">Cryo<span>Clear</span></div>
       <div class="sub">real-time particle-picking &amp; junk-triage copilot</div>
       <div class="spacer"></div>
-      <div class="pill">dataset <b>EMPIAR-${empiar}</b></div>
+      ${datasets.length > 1 ? html`<select class="dataset-sel" value=${selEmpiar || ''}
+         onChange=${e => setSelEmpiar(e.target.value)} title="Switch dataset">
+        ${datasets.map(d => html`<option key=${d.empiar} value=${d.empiar}>${d.label}${d.has_gt ? '' : ' · no GT'}</option>`)}
+      </select>` : html`<div class="pill">dataset <b>EMPIAR-${empiar}</b></div>`}
       <div class="pill">${info.micrographs.length} micrographs</div>
       <div class="pill"><span class=${'dot ' + (streaming ? 'on' : 'off')}></span>${streaming ? 'streaming' : 'idle'}</div>
     </div>

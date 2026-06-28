@@ -22,6 +22,9 @@ from cryoclear.junk_classifier import JunkClassifier  # noqa: E402
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--empiar", default=config.DEMO_EMPIAR_ID)
+    ap.add_argument("--score-from", default=None,
+                    help="EMPIAR id whose trained rf/lgbm models to apply (for a dataset "
+                         "with no ground-truth labels — a cross-protein generalisation demo)")
     args = ap.parse_args()
     cache = config.PROCESSED / args.empiar / "webcache"
     idx = json.loads((cache / "index.json").read_text())
@@ -32,14 +35,23 @@ def main() -> int:
         k = d["true_junk"] != -1
         Xs.append(d["feats"][k])
         ys.append(d["true_junk"][k])
-    X = np.vstack(Xs)
-    y = np.concatenate(ys).astype(int)
-    print(f"training on {len(X)} labelled candidates ({y.mean():.2f} junk)", flush=True)
+    y = np.concatenate(ys).astype(int) if ys else np.zeros(0, int)
+    labelled = len(y) and len(np.unique(y)) > 1
 
-    models = {mt: JunkClassifier(model_type=mt).fit(X, y) for mt in ("rf", "lgbm")}
-    for mt, clf in models.items():
-        clf.save(config.PROCESSED / args.empiar / f"junk_{mt}.joblib")
-    print("fitted rf + lgbm; caching scores…", flush=True)
+    if args.score_from:                                   # no training — reuse another dataset's models
+        src = config.PROCESSED / args.score_from
+        models = {mt: JunkClassifier.load(src / f"junk_{mt}.joblib") for mt in ("rf", "lgbm")}
+        print(f"scoring {args.empiar} with {args.score_from}'s rf + lgbm models (no GT)", flush=True)
+    elif labelled:
+        X = np.vstack(Xs)
+        print(f"training on {len(X)} labelled candidates ({y.mean():.2f} junk)", flush=True)
+        models = {mt: JunkClassifier(model_type=mt).fit(X, y) for mt in ("rf", "lgbm")}
+        for mt, clf in models.items():
+            clf.save(config.PROCESSED / args.empiar / f"junk_{mt}.joblib")
+        print("fitted rf + lgbm; caching scores…", flush=True)
+    else:
+        print(f"no labels in {args.empiar} and no --score-from given; nothing to do", flush=True)
+        return 1
 
     for m in idx["micrographs"]:
         stem = m["stem"]

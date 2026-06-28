@@ -23,6 +23,9 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 .hdr .pill { font-family: var(--mono); font-size: 11.5px; color: var(--muted);
   border: 1px solid var(--border); border-radius: 6px; padding: 4px 9px; background: var(--panel); }
 .hdr .pill b { color: var(--text); }
+.dataset-sel { width: auto; font-family: var(--sans); font-size: 12.5px; color: var(--text);
+  background: var(--panel); border: 1px solid var(--primary); border-radius: 6px; padding: 5px 9px;
+  font-weight: 600; cursor: pointer; }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
 .dot.on { background: var(--keep); } .dot.off { background: var(--muted); }
 

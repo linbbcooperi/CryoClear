@@ -124,9 +124,12 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--empiar", default=config.DEMO_EMPIAR_ID)
     ap.add_argument("--factor", type=int, default=4)
+    ap.add_argument("--box", type=int, default=None, help="particle box in full-res px (per dataset)")
+    ap.add_argument("--radius", type=float, default=None, help="GT match radius in full-res px")
     ap.add_argument("--workers", type=int, default=None)
     args = ap.parse_args()
-    idx = precompute(args.empiar, factor=args.factor, workers=args.workers)
+    idx = precompute(args.empiar, factor=args.factor, box=args.box,
+                     radius=args.radius, workers=args.workers)
     print(f"cached {len(idx['micrographs'])} micrographs -> {cache_dir(args.empiar)}")
     return 0
 

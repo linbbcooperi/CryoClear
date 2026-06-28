@@ -41,6 +41,15 @@ CLF_OPTIONS = {
     "cnn": {"label": "CNN — learned on raw 64px crops", "heldout": 0.248, "thr": 0.50},
 }
 
+# Preloaded datasets selectable in the UI. 10017 has CryoPPP ground truth (full metrics);
+# 10005/10025 are different proteins scored by the 10017-trained classifier — a live
+# cross-protein generalisation demo (no ground truth → counts only, no precision/recall).
+DATASETS = {
+    "10017": {"label": "β-galactosidase · EMPIAR-10017", "diameter": 108, "has_gt": True},
+    "10005": {"label": "TRPV1 ion channel · EMPIAR-10005", "diameter": 180, "has_gt": False},
+    "10025": {"label": "T20S proteasome · EMPIAR-10025", "diameter": 160, "has_gt": False},
+}
+
 
 class State:
     def __init__(self, empiar: str):
@@ -151,6 +160,16 @@ def api_state(empiar: str | None = None):
             "clf_model": s.clf_model, "mode": s.mode,
             "clf_options": CLF_OPTIONS,
             "micrographs": s.index["micrographs"]}
+
+
+@app.get("/api/datasets")
+def api_datasets():
+    """List preloaded datasets and whether each has a precomputed cache."""
+    out = []
+    for empiar, meta in DATASETS.items():
+        ready = (cache_dir(empiar) / "index.json").exists()
+        out.append({"empiar": empiar, "ready": ready, **meta})
+    return {"datasets": out}
 
 
 @app.get("/api/img/{empiar}/{stem}.png")
