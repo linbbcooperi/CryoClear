@@ -158,6 +158,7 @@ function App() {
   const [tool, setTool] = useState('select');
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [f1hist, setF1] = useState([]);
   const [classes, setClasses] = useState(null);
   const [busy2d, setBusy2d] = useState(false);
@@ -201,6 +202,16 @@ function App() {
   };
   const undo = () => J('/api/undo', { empiar }).then(applyUndoRedo);
   const redo = () => J('/api/redo', { empiar }).then(applyUndoRedo);
+  const uploadMrc = (files) => {
+    const f = files && files[0]; if (!f) return;
+    setUploading(true);
+    fetch(`/api/upload?empiar=${empiar}&filename=${encodeURIComponent(f.name)}`, { method: 'POST', body: f })
+      .then(r => r.json()).then(r => {
+        setUploading(false);
+        if (!r.ok) { alert('Upload failed: ' + (r.error || 'unknown')); return; }
+        G('/api/state').then(s => { setInfo(s); const j = s.micrographs.findIndex(m => m.stem === r.stem); if (j >= 0) setIdx(j); });
+      }).catch(e => { setUploading(false); alert('Upload error: ' + e); });
+  };
 
   const changeTh = (t) => { setTh(t); J('/api/threshold', { empiar, threshold: t }).then(() => load()); };
   const switchMode = (m) => { setMode(m); J('/api/mode', { empiar, mode: m }).then(() => { setF1([]); load(); }); };
@@ -268,6 +279,11 @@ function App() {
             ${info.micrographs.map((m, i) => html`<option key=${m.stem} value=${m.stem}>${i + 1}. ${m.stem}</option>`)}
           </select>
           <button class="sm" onClick=${() => setIdx(i => Math.min(info.micrographs.length - 1, i + 1))}>next ▶</button>
+          <label class=${'sm' + (uploading ? ' primary' : '')} style=${{ cursor: 'pointer' }}
+             title="Pick + junk-triage your own micrograph (no ground truth)">
+            ${uploading ? 'uploading…' : 'upload MRC'}
+            <input type="file" accept=".mrc" style=${{ display: 'none' }} onChange=${e => uploadMrc(e.target.files)} />
+          </label>
           <div style=${{ width: '12px' }}></div>
           <span class="lbl">brush:</span>
           <button class=${'sm junk' + (brush === 'junk' ? ' active' : '')} onClick=${() => setBrush('junk')}>dump <span class="kbd">d</span></button>

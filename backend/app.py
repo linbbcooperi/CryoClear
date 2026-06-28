@@ -19,7 +19,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect  # noqa: E402
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect  # noqa: E402
 from fastapi.responses import FileResponse, JSONResponse, Response  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
@@ -269,6 +269,62 @@ def api_threshold(payload: dict):
     s = get_state(payload.get("empiar"))
     s.threshold = float(payload["threshold"])
     return {"threshold": s.threshold}
+
+
+@app.post("/api/upload")
+async def api_upload(request: Request, empiar: str = config.DEMO_EMPIAR_ID,
+                     filename: str = "upload.mrc"):
+    """Bring-your-own micrograph: accept a raw .mrc body, pick + score it with the
+    current dataset's trained classifiers, and add it to the live micrograph list.
+    No ground truth, so picking precision/recall read as N/A (counts still shown)."""
+    import re
+
+    import matplotlib.image as mpimg
+
+    from cryoclear import features as feat, io_mrc, picker
+
+    s = get_state(empiar)
+    data = await request.body()
+    if not data:
+        return JSONResponse({"ok": False, "error": "empty upload"}, status_code=400)
+    stem = "up_" + (re.sub(r"[^A-Za-z0-9_-]", "_", Path(filename).stem)[:40] or "mrc")
+    updir = config.RAW / empiar / "uploads"
+    updir.mkdir(parents=True, exist_ok=True)
+    mrc = updir / f"{stem}.mrc"
+    mrc.write_bytes(data)
+    try:
+        imgf = io_mrc.normalize_8bit(io_mrc.load_mrc(mrc))
+        img = io_mrc.load_for_pipeline(mrc, factor=s.factor)
+    except Exception as e:                      # not a valid MRC
+        return JSONResponse({"ok": False, "error": f"unreadable MRC: {e}"}, status_code=400)
+
+    (s.cache / "img").mkdir(parents=True, exist_ok=True)
+    (s.cache / "data").mkdir(parents=True, exist_ok=True)
+    mpimg.imsave(s.cache / "img" / f"{stem}.png", img, cmap="gray", vmin=0, vmax=255)
+    box = s.index.get("box", config.DEMO_PARTICLE_DIAMETER_PX)
+    pred_disp = picker.pick(img, backend="blob")
+    pred_full = pred_disp * float(s.factor)
+    feats = feat.extract_features(imgf, pred_full, box=box)
+    payload = dict(
+        pred_disp=pred_disp.astype(np.float32), pred_full=pred_full.astype(np.float32),
+        scores=np.zeros(len(pred_full), np.float32),
+        true_junk=np.full(len(pred_full), -1, np.int8), feats=feats.astype(np.float32))
+    for mt in ("rf", "lgbm"):
+        mp = config.PROCESSED / empiar / f"junk_{mt}.joblib"
+        if mp.exists() and len(feats):
+            try:
+                payload[f"{mt}_scores"] = JunkClassifier.load(mp).predict_junk_proba(feats).astype(np.float32)
+            except Exception:
+                pass
+    np.savez_compressed(s.cache / "data" / f"{stem}.npz", **payload)
+
+    s.index["micrographs"] = [m for m in s.index["micrographs"] if m["stem"] != stem]
+    s.index["micrographs"].append({"stem": stem, "n_picks": int(len(pred_full)),
+                                   "h": int(img.shape[0]), "w": int(img.shape[1]),
+                                   "n_gt": 0, "uploaded": True})
+    (s.cache / "index.json").write_text(json.dumps(s.index, indent=2))
+    s._npz.pop(stem, None)
+    return {"ok": True, "stem": stem, "n_picks": int(len(pred_full))}
 
 
 @app.post("/api/reset")
