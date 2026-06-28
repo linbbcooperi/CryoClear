@@ -44,6 +44,7 @@ class State:
         self.radius = self.index["radius"]
         self.threshold = 0.5
         self.mode = "model"               # "model"=precomputed scores | "learn"=live cold-start AL
+        self.clf_model = "lgbm"           # "lgbm" | "rf" | "cnn" (model mode)
         self._npz: dict[str, dict] = {}
         self.overrides: dict[str, dict] = {}   # {stem: {idx: label}} manual HITL corrections
         self.learner = ActiveLearner(JunkClassifier())
@@ -90,9 +91,10 @@ class State:
             feats = d["feats"]
             return (np.asarray(self.learner.clf.predict_junk_proba(feats))
                     if len(feats) else np.zeros(0))
-        if "cnn_scores" in d:        # CNN (honest, generalizes better than the RF)
-            return d["cnn_scores"]
-        return d["scores"]           # RandomForest fallback
+        key = {"lgbm": "lgbm_scores", "rf": "rf_scores", "cnn": "cnn_scores"}.get(self.clf_model)
+        if key and key in d:
+            return d[key]
+        return d["lgbm_scores"] if "lgbm_scores" in d else d["scores"]
 
     def junk_mask(self, stem: str) -> np.ndarray:
         junk = self.scores(stem) >= self.threshold
@@ -134,6 +136,11 @@ def api_state(empiar: str | None = None):
     return {"empiar": s.empiar, "factor": s.factor, "radius": s.radius,
             "threshold": s.threshold, "coldstart": s.coldstart,
             "corrections": s.corrections, "f1_history": s.f1_history,
+            "clf_model": s.clf_model, "mode": s.mode,
+            "clf_options": {
+                "lgbm": {"label": "LightGBM (boosted trees)", "heldout": 0.234},
+                "rf": {"label": "RandomForest", "heldout": 0.025},
+                "cnn": {"label": "CNN (raw crops)", "heldout": 0.248}},
             "micrographs": s.index["micrographs"]}
 
 
@@ -160,6 +167,13 @@ def api_mode(payload: dict):
         s._seed_learner(coldstart=True)
         s.overrides = {}
     return {"mode": s.mode}
+
+
+@app.post("/api/clf_model")
+def api_clf_model(payload: dict):
+    s = get_state(payload.get("empiar"))
+    s.clf_model = payload.get("clf_model", "lgbm")
+    return {"clf_model": s.clf_model}
 
 
 @app.post("/api/correct")

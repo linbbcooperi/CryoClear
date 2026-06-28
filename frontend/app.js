@@ -110,6 +110,7 @@ function App() {
   const [met, setMet] = useState(null);
   const [threshold, setTh] = useState(0.5);
   const [mode, setMode] = useState('model');
+  const [clfModel, setClf] = useState('lgbm');
   const [brush, setBrush] = useState('junk');
   const [f1hist, setF1] = useState([]);
   const [classes, setClasses] = useState(null);
@@ -122,7 +123,7 @@ function App() {
   const mic = info && info.micrographs[idx];
   const stem = mic && mic.stem;
 
-  useEffect(() => { G('/api/state').then(s => { setInfo(s); setTh(s.threshold); }); }, []);
+  useEffect(() => { G('/api/state').then(s => { setInfo(s); setTh(s.threshold); setClf(s.clf_model); }); }, []);
 
   const load = useCallback(() => {
     if (!empiar || !stem) return;
@@ -141,6 +142,7 @@ function App() {
 
   const changeTh = (t) => { setTh(t); J('/api/threshold', { empiar, threshold: t }).then(() => load()); };
   const switchMode = (m) => { setMode(m); J('/api/mode', { empiar, mode: m }).then(() => { setF1([]); load(); }); };
+  const switchClf = (m) => { setClf(m); J('/api/clf_model', { empiar, clf_model: m }).then(() => load()); };
   const reset = () => { J('/api/reset', { empiar, coldstart: mode === 'learn' }).then(() => { setF1([]); load(); }); };
   const run2d = () => { setBusy2d(true); J('/api/classify2d', { empiar }).then(r => { setClasses(r); setBusy2d(false); }); };
 
@@ -235,7 +237,19 @@ function App() {
 
         <div class="divider"></div>
         <div class="group">
-          <h4>Model</h4>
+          <h4>Junk classifier</h4>
+          <select value=${clfModel} disabled=${mode === 'learn'} onChange=${e => switchClf(e.target.value)}>
+            ${Object.entries(info.clf_options).map(([k, v]) =>
+              html`<option key=${k} value=${k}>${v.label} · held-out F1 ${v.heldout.toFixed(2)}</option>`)}
+          </select>
+          <div class="note">Held-out picking F1 (not in-sample). LightGBM (boosted trees) extracts the
+            most signal; RandomForest collapses to all-junk; the CNN is comparable. β-gal junk is hard —
+            the honest gain is modest until a stronger picker is used.</div>
+        </div>
+
+        <div class="divider"></div>
+        <div class="group">
+          <h4>Learning mode</h4>
           <div class="row">
             <button class=${mode === 'model' ? 'primary sm' : 'sm'} onClick=${() => switchMode('model')}>Trained model</button>
             <button class=${mode === 'learn' ? 'primary sm' : 'sm'} onClick=${() => switchMode('learn')}>Active-learning</button>
