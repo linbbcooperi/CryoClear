@@ -55,6 +55,8 @@ DATASETS = {
     "10345": {"label": "EMPIAR-10345", "diameter": 108, "has_gt": True},
     "10081": {"label": "EMPIAR-10081 · TMV", "diameter": 108, "has_gt": True},
     "10093": {"label": "EMPIAR-10093", "diameter": 108, "has_gt": True},
+    "10590": {"label": "Human BAF complex · EMPIAR-10590", "diameter": 200, "has_gt": True},
+    "10291": {"label": "Innexin-6 hemichannel · EMPIAR-10291", "diameter": 180, "has_gt": True},
 }
 
 
