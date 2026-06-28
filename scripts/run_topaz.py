@@ -56,9 +56,21 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     proc.mkdir(parents=True, exist_ok=True)
 
-    print(f"preprocess {len(mics)} micrographs (scale {args.scale}, {args.workers} workers)…", flush=True)
-    subprocess.run([TOPAZ_BIN, "preprocess", "-s", str(args.scale), "--num-workers",
-                    str(args.workers), "-o", str(proc) + "/"] + [str(m) for m in mics], check=True)
+    # NOTE: `topaz preprocess --num-workers N` (N>0) DEADLOCKS on this box (its multiprocessing
+    # pool hangs writing files). Run one inline (`--num-workers 0`) subprocess PER micrograph and
+    # parallelise at the shell/thread level instead — same speed, no deadlock, resumable.
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _pp(m):
+        dst = proc / f"{m.stem}.mrc"
+        if dst.exists():
+            return                                          # resumable: skip already-preprocessed
+        subprocess.run([TOPAZ_BIN, "preprocess", "-s", str(args.scale), "--num-workers", "0",
+                        "-o", str(proc) + "/", str(m)], check=True)
+
+    print(f"preprocess {len(mics)} micrographs (scale {args.scale}, {args.workers}× per-mic)…", flush=True)
+    with ThreadPoolExecutor(max_workers=args.workers) as ex:
+        list(ex.map(_pp, mics))
     procs = sorted(proc.glob("*.mrc"))
     picks_txt = out / "_all_picks.txt"
     print(f"extract with {args.model} (r={args.radius})…", flush=True)
