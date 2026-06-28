@@ -171,6 +171,8 @@ if "f1_history" not in st.session_state:
     st.session_state.f1_history = []       # junk-F1 after each teach round
 if "taught" not in st.session_state:
     st.session_state.taught = 0
+if "al_taught_idx" not in st.session_state:
+    st.session_state.al_taught_idx = set()  # candidate indices already labelled this session
 
 # ---------------------------------------------------------------- pick a micrograph
 mic_names = _list_micrographs(empiar)
@@ -237,6 +239,7 @@ if al_on and train_tbl is not None and len(feats):
         st.session_state.al_seed = al_seed
         st.session_state.f1_history = []
         st.session_state.taught = 0
+        st.session_state.al_taught_idx = set()
     is_junk = np.asarray(
         st.session_state.al_learner.predict_is_junk(feats, threshold=threshold), dtype=bool)
 elif clf is not None and len(feats):
@@ -327,10 +330,14 @@ if al_on and st.session_state.al_learner is not None and true_is_junk is not Non
     c1, c2, c3 = st.columns([1.3, 1, 1])
     teach_n = c1.select_slider("Corrections / round", options=[5, 10, 20, 50], value=10)
     if c2.button("👩‍🔬 Teach", type="primary"):
-        wrong = np.where(is_junk != true_is_junk)[0]
-        if len(wrong):
-            take = wrong[:teach_n]
+        # the scientist reviews a fresh batch of picks and gives their true labels
+        # (representative, not just the model's errors → a smooth honest climb)
+        avail = [k for k in range(len(feats)) if k not in st.session_state.al_taught_idx]
+        _r = np.random.default_rng(len(st.session_state.f1_history))
+        take = _r.permutation(avail)[:teach_n] if avail else np.array([], dtype=int)
+        if len(take):
             learner.add_corrections(feats[take], true_is_junk[take])
+            st.session_state.al_taught_idx.update(int(t) for t in take)
             st.session_state.taught += len(take)
             new_pred = np.asarray(learner.predict_is_junk(feats, threshold=threshold), dtype=bool)
             st.session_state.f1_history.append(
