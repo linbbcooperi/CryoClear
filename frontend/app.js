@@ -189,6 +189,15 @@ function App() {
   const switchClf = (m) => { setClf(m); J('/api/clf_model', { empiar, clf_model: m }).then(() => load()); };
   const reset = () => { J('/api/reset', { empiar, coldstart: mode === 'learn' }).then(() => { setF1([]); load(); }); };
   const run2d = () => { setBusy2d(true); J('/api/classify2d', { empiar }).then(r => { setClasses(r); setBusy2d(false); }); };
+  const savePng = (type) => {
+    const c = document.querySelector('.canvas-wrap canvas'); if (!c) return;
+    c.toBlob((blob) => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${stem}_overlay.${type === 'image/jpeg' ? 'jpg' : 'png'}`;
+      a.click(); URL.revokeObjectURL(a.href);
+    }, type, 0.92);
+  };
 
   // keyboard k / d / u apply to nothing without a selection; we use brush toggle instead.
   useEffect(() => {
@@ -318,6 +327,20 @@ function App() {
           ${timeline.length > 1 ? html`<${Plot} h=${110}
             data=${[{ type: 'scatter', mode: 'lines', y: timeline, line: { color: '#d8a657' }, fill: 'tozeroy', fillcolor: 'rgba(216,166,87,.1)' }]}
             layout=${{ yaxis: { range: [0, 100], title: '%junk' } }} />` : null}
+        </div>
+
+        <div class="divider"></div>
+        <div class="group">
+          <h4>Export</h4>
+          <div class="row" style=${{ flexWrap: 'wrap' }}>
+            <button class="sm" onClick=${() => window.open(`/api/export/coords/${empiar}/${stem}?fmt=star`)}>.star</button>
+            <button class="sm" onClick=${() => window.open(`/api/export/coords/${empiar}/${stem}?fmt=box`)}>.box</button>
+            <button class="sm" onClick=${() => savePng('image/png')}>PNG</button>
+            <button class="sm" onClick=${() => savePng('image/jpeg')}>JPEG</button>
+            <button class="sm" onClick=${() => window.open(`/api/export/report/${empiar}`)}>PDF report</button>
+          </div>
+          <div class="note">.star / .box = kept-particle coordinates for RELION &amp; cryoSPARC;
+            PNG/JPEG = overlay snapshot; PDF = honest scorecard.</div>
         </div>
 
         <div class="divider"></div>

@@ -289,6 +289,76 @@ async def ws_stream(ws: WebSocket):
 
 
 # ---------------------------------------------------------------- frontend
+@app.get("/api/export/coords/{empiar}/{stem}")
+def api_export_coords(empiar: str, stem: str, fmt: str = "star"):
+    """Kept-particle coordinates (full-res) as RELION .star or EMAN .box — the
+    product output that feeds RELION/cryoSPARC."""
+    s = get_state(empiar)
+    kept = s.npz(stem)["pred_full"][~s.junk_mask(stem)]
+    box = config.DEMO_PARTICLE_DIAMETER_PX
+    if fmt == "box":
+        body = "".join(f"{x - box/2:.1f}\t{y - box/2:.1f}\t{box}\t{box}\n" for x, y in kept)
+        fname = f"{stem}_kept.box"
+    else:
+        body = ("\ndata_\n\nloop_\n_rlnCoordinateX #1\n_rlnCoordinateY #2\n"
+                + "".join(f"{x:.2f}\t{y:.2f}\n" for x, y in kept))
+        fname = f"{stem}_kept.star"
+    return Response(body, media_type="text/plain",
+                    headers={"Content-Disposition": f"attachment; filename={fname}"})
+
+
+@app.get("/api/export/report/{empiar}")
+def api_export_report(empiar: str):
+    """One-page PDF scorecard: dataset, picker, classifier, and honest aggregate metrics."""
+    import io
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_pdf import PdfPages
+
+    s = get_state(empiar)
+    tot_c = tot_k = 0
+    pb, pa = [], []
+    for m in s.index["micrographs"]:
+        stem = m["stem"]
+        junk = s.junk_mask(stem)
+        tot_c += len(junk)
+        tot_k += int((~junk).sum())
+        pb.append(s.picking(stem, np.ones(len(junk), bool))["f1"])
+        pa.append(s.picking(stem, ~junk)["f1"])
+    pb_m, pa_m = float(np.mean(pb)), float(np.mean(pa))
+
+    buf = io.BytesIO()
+    with PdfPages(buf) as pdf:
+        fig = plt.figure(figsize=(8.5, 11))
+        fig.text(0.08, 0.93, "CryoClear — junk-triage report", fontsize=20, weight="bold")
+        fig.text(0.08, 0.90, f"EMPIAR-{empiar} · picker: blob · classifier: {s.clf_model} "
+                 f"· threshold {s.threshold:.2f}", fontsize=11, color="#555")
+        lines = [
+            f"Micrographs: {len(s.index['micrographs'])}",
+            f"Candidates picked: {tot_c:,}",
+            f"Particles kept (after junk triage): {tot_k:,}  ({100*tot_k/max(tot_c,1):.1f}%)",
+            f"Junk removed: {100*(1-tot_k/max(tot_c,1)):.1f}%",
+            "",
+            f"Picking F1 vs CryoPPP ground truth (mean over micrographs):",
+            f"    raw picks:        {pb_m:.3f}",
+            f"    after junk triage: {pa_m:.3f}",
+            "",
+            "Note: in-sample numbers are optimistic; held-out generalization is the honest",
+            "metric (see eval/heldout_eval.py and eval/compare_classifiers.py).",
+        ]
+        fig.text(0.08, 0.82, "\n".join(lines), fontsize=12, va="top", family="monospace")
+        ax = fig.add_axes([0.1, 0.32, 0.5, 0.28])
+        ax.bar(["raw", "after triage"], [pb_m, pa_m], color=["#888", "#29c393"])
+        ax.set_ylim(0, 1)
+        ax.set_title("Picking F1", fontsize=11)
+        pdf.savefig(fig)
+        plt.close(fig)
+    return Response(buf.getvalue(), media_type="application/pdf",
+                    headers={"Content-Disposition": "attachment; filename=cryoclear_report.pdf"})
+
+
 @app.on_event("startup")
 def _prewarm():
     try:
