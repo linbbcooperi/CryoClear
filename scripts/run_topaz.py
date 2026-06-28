@@ -61,12 +61,17 @@ def main() -> int:
     # parallelise at the shell/thread level instead — same speed, no deadlock, resumable.
     from concurrent.futures import ThreadPoolExecutor
 
+    # cap BLAS/OMP threads PER subprocess — without this, each parallel topaz grabs all cores,
+    # oversubscribes, and thrashes (observed: 6 procs at 500%+ CPU, zero output after 5 min).
+    pp_env = {**os.environ, "OMP_NUM_THREADS": "4", "MKL_NUM_THREADS": "4",
+              "OPENBLAS_NUM_THREADS": "4", "NUMEXPR_NUM_THREADS": "4"}
+
     def _pp(m):
         dst = proc / f"{m.stem}.mrc"
         if dst.exists():
             return                                          # resumable: skip already-preprocessed
         subprocess.run([TOPAZ_BIN, "preprocess", "-s", str(args.scale), "--num-workers", "0",
-                        "-o", str(proc) + "/", str(m)], check=True)
+                        "-o", str(proc) + "/", str(m)], check=True, env=pp_env)
 
     print(f"preprocess {len(mics)} micrographs (scale {args.scale}, {args.workers}× per-mic)…", flush=True)
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
