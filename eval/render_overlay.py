@@ -28,6 +28,7 @@ def main() -> int:
     ap.add_argument("--backend", default="blob")
     ap.add_argument("--out", default="/workspace/proof.png")
     ap.add_argument("--dpi", type=int, default=95)
+    ap.add_argument("--crop", default="", help="x0,y0,size in display px for a zoomed view")
     args = ap.parse_args()
 
     raw = config.RAW / args.empiar
@@ -48,14 +49,24 @@ def main() -> int:
     feats = features.extract_features(imgf, pf, box=config.DEMO_PARTICLE_DIAMETER_PX)
     isj = np.asarray(clf.predict_is_junk(feats), dtype=bool)
 
+    s_keep, s_junk = 24, 9
+    if args.crop:
+        x0, y0, sz = (int(v) for v in args.crop.split(","))
+        img = img[y0:y0 + sz, x0:x0 + sz]
+        m = ((pd[:, 0] >= x0) & (pd[:, 0] < x0 + sz)
+             & (pd[:, 1] >= y0) & (pd[:, 1] < y0 + sz))
+        pd = pd[m] - np.array([x0, y0])
+        isj = isj[m]
+        s_keep, s_junk = 220, 90   # bigger markers in the zoomed view
+
     plt.style.use("dark_background")
     fig, ax = plt.subplots(figsize=(7, 7), dpi=args.dpi)
     ax.imshow(img, cmap="gray")
     k, j = pd[~isj], pd[isj]
-    ax.scatter(j[:, 0], j[:, 1], s=9, facecolors="none", edgecolors="#e74c3c",
-               linewidths=0.4, label=f"junk ({len(j)})")
-    ax.scatter(k[:, 0], k[:, 1], s=24, facecolors="none", edgecolors="#2ecc71",
-               linewidths=0.9, label=f"keep ({len(k)})")
+    ax.scatter(j[:, 0], j[:, 1], s=s_junk, facecolors="none", edgecolors="#e74c3c",
+               linewidths=0.6, label=f"junk ({len(j)})")
+    ax.scatter(k[:, 0], k[:, 1], s=s_keep, facecolors="none", edgecolors="#2ecc71",
+               linewidths=1.1, label=f"keep ({len(k)})")
     ax.legend(loc="upper right", fontsize=8, framealpha=0.4)
     ax.set_title(f"{mic.name}  [{args.backend}]", fontsize=8)
     ax.set_axis_off()
