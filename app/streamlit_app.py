@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import streamlit as st  # noqa: E402
 
 from cryoclear import (  # noqa: E402
-    config, coords, features, io_mrc, metrics, picker,
+    class2d, config, coords, features, io_mrc, metrics, picker,
 )
 from cryoclear.active_learning import ActiveLearner  # noqa: E402
 from cryoclear.junk_classifier import JunkClassifier  # noqa: E402
@@ -118,6 +118,30 @@ def _load_train_table(empiar_id: str):
         return None
     d = np.load(p)
     return d["X"].astype(float), d["y"].astype(int)
+
+
+@st.cache_data(show_spinner="Running 2D classification of kept particles…")
+def _class_averages(empiar_id: str, n_classes: int, max_particles: int, fac: int):
+    """M4: extract KEPT particles across micrographs and 2D-classify them."""
+    raw = config.RAW / empiar_id
+    model = config.PROCESSED / empiar_id / "junk_classifier.joblib"
+    if not model.exists():
+        return None
+    cl = JunkClassifier.load(model)
+    crops_all, n = [], 0
+    for mic in sorted((raw / "micrographs").glob("*.mrc")):
+        imgf = io_mrc.normalize_8bit(io_mrc.load_mrc(mic))
+        im = io_mrc.load_for_pipeline(mic, factor=fac)
+        pf = picker.pick(im, backend="blob") * float(fac)
+        ff = features.extract_features(imgf, pf, box=config.DEMO_PARTICLE_DIAMETER_PX)
+        kept = pf[~np.asarray(cl.predict_is_junk(ff), dtype=bool)]
+        crops_all.append(class2d.extract_particles(imgf, kept, box=160, out_size=64))
+        n += len(crops_all[-1])
+        if n >= max_particles:
+            break
+    stack = np.concatenate(crops_all)[:max_particles] if crops_all else np.zeros((0, 64, 64))
+    avgs, _labels, counts = class2d.classify_2d(stack, n_classes=n_classes)
+    return avgs, counts, len(stack)
 
 
 def _load_model() -> JunkClassifier | None:
@@ -374,5 +398,33 @@ if _HAVE_CLICK:
             _record_correction(i, feats, lbl)
             st.rerun()
 
+# ---------------------------------------------------------------- 2D class averages (M4)
+st.divider()
+with st.expander("🔬 2D class averages of kept particles (M4) — proof the picks are real"):
+    st.caption("Reference-free 2D classification of the **kept** particles. Real particles "
+               "average into coherent protein density; junk would not.")
+    if not have_real:
+        st.info("Needs real micrographs + a trained junk model.")
+    elif st.button("Compute 2D class averages"):
+        result = _class_averages(empiar, 6, 400, factor)
+        if result is None:
+            st.warning("No junk model — run scripts/train_junk_classifier.py first.")
+        else:
+            avgs, counts, npart = result
+            keep = [i for i in range(len(avgs)) if counts[i] >= 8]
+            if keep:
+                import matplotlib.pyplot as plt
+                fig2, axes = plt.subplots(1, len(keep), figsize=(2.0 * len(keep), 2.4))
+                axes = np.atleast_1d(axes)
+                for ax, i in zip(axes, keep):
+                    ax.imshow(avgs[i], cmap="gray")
+                    ax.set_title(f"{counts[i]} ptcls", fontsize=8)
+                    ax.set_axis_off()
+                st.pyplot(fig2, width="content")
+                st.caption(f"{npart} kept particles → {len(keep)} class averages "
+                           "(coherent central density = real particles).")
+            else:
+                st.warning("No well-populated classes — try more particles.")
+
 st.caption("Pickers: blob (LoG) + CryoSegNet (SAM, cached) · junk classifier: RandomForest · "
-           "live active learning · open source (MIT). Build ladder M1→M4 in CLAUDE.md.")
+           "live active learning · 2D class averages · open source (MIT). M1→M4 in CLAUDE.md.")
