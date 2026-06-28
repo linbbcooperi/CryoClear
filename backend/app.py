@@ -522,7 +522,7 @@ def api_metrics(empiar: str, stem: str):
 def api_classify2d(payload: dict):
     s = get_state(payload.get("empiar"))
     from cryoclear import class2d, io_mrc
-    max_particles = int(payload.get("max_particles", 400))
+    max_particles = int(payload.get("max_particles", 900))
     crops_all, n = [], 0
     for info in s.index["micrographs"]:
         stem = info["stem"]
@@ -530,12 +530,12 @@ def api_classify2d(payload: dict):
         d = s.npz(stem)
         kept = d["pred_full"][~s.junk_mask(stem)]
         imgf = io_mrc.normalize_8bit(io_mrc.load_mrc(mic))
-        crops_all.append(class2d.extract_particles(imgf, kept, box=160, out_size=64))
+        crops_all.append(class2d.extract_particles(imgf, kept, box=160, out_size=96))
         n += len(crops_all[-1])
         if n >= max_particles:
             break
     stack = np.concatenate(crops_all)[:max_particles] if crops_all else np.zeros((0, 64, 64))
-    avgs, _lab, counts = class2d.classify_2d(stack, n_classes=int(payload.get("n_classes", 6)))
+    avgs, _lab, counts = class2d.classify_2d(stack, n_classes=int(payload.get("n_classes", 8)))
     keep = [i for i in range(len(avgs)) if counts[i] >= 8]
     return {"n_particles": int(len(stack)),
             "classes": [{"png": _png_b64(avgs[i]), "count": int(counts[i])} for i in keep]}

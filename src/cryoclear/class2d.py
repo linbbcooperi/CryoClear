@@ -1,19 +1,38 @@
-"""Lightweight reference-free 2D classification of kept particles (M4).
+"""Reference-free 2D classification of kept particles (M4) — cryoSPARC-style.
 
-Produces class-average images ("2D classes") — the cryo-EM sanity check that the
-kept particles are real protein views. Pure numpy + scipy (no RELION/cryoSPARC).
-ASPIRE is the heavier alternative; this is the always-works fallback.
+Produces class-average images ("2D classes"), the cryo-EM check that the kept
+particles are real protein views. Pure numpy + scipy (no RELION/cryoSPARC).
 
-Pipeline: extract crops -> normalise + circular mask -> multi-reference alignment
-(rotational alignment by angular cross-correlation in polar coords) -> class means.
+What makes the averages crisp (the cryoSPARC-like ingredients we added):
+  1. **Translational + rotational** alignment. The old version aligned rotation only,
+     so the picker's ±several-px centring error blurred every average — the #1 fix.
+     Translation uses **phase correlation** (sharp peak) and is applied with a
+     **Fourier shift** (no spline-interpolation blur).
+  2. **Resolution annealing** (frequency marching): align coarse first (heavy
+     low-pass) and tighten each iteration — the biggest crispness trick after (1).
+  3. **Band-pass** alignment images (high-pass removes the ice/carbon ramp, low-pass
+     removes noise) kept separate from the lightly-filtered average accumulator.
+  4. **Soft cosine mask** (a hard binary mask rings the FFT).
+  5. **Rotation-invariant PCA + k-means++** initialisation (no random seeds → classes
+     stop being blends of views).
+  6. **Outlier rejection** (drop the lowest-scoring members before averaging) and
+     dropping tiny classes; uses many particles (averages sharpen as ~1/sqrt(N)).
 """
 from __future__ import annotations
 
 import numpy as np
 
 
-def extract_particles(image: np.ndarray, coords, box: int, out_size: int = 64) -> np.ndarray:
-    """Crop `box`-px particles at `coords` (full-res x,y), resize to out_size, normalise+mask."""
+def _soft_mask(s: int, radius: float | None = None, edge: float = 5.0) -> np.ndarray:
+    yy, xx = np.mgrid[0:s, 0:s]
+    c = (s - 1) / 2
+    rr = np.hypot(xx - c, yy - c)
+    radius = radius if radius is not None else s * 0.46
+    return np.clip((radius - rr) / edge + 0.5, 0.0, 1.0).astype(np.float32)
+
+
+def extract_particles(image: np.ndarray, coords, box: int, out_size: int = 96) -> np.ndarray:
+    """Crop `box`-px particles at `coords` (full-res x,y), resize to out_size, normalise."""
     from scipy.ndimage import zoom
 
     coords = np.asarray(coords, dtype=float).reshape(-1, 2)
@@ -32,19 +51,22 @@ def extract_particles(image: np.ndarray, coords, box: int, out_size: int = 64) -
         crops.append(c)
     if not crops:
         return np.zeros((0, out_size, out_size), dtype=np.float32)
-    stack = np.stack(crops)
-    return stack * _circular_mask(out_size)
+    return np.stack(crops)
 
 
-def _circular_mask(s: int) -> np.ndarray:
-    yy, xx = np.mgrid[0:s, 0:s]
-    c = (s - 1) / 2
-    return ((xx - c) ** 2 + (yy - c) ** 2 <= (s / 2) ** 2).astype(np.float32)
+def _lowpass(img: np.ndarray, sigma: float) -> np.ndarray:
+    from scipy.ndimage import gaussian_filter
+    return gaussian_filter(img, sigma)
 
 
-def _to_polar(img: np.ndarray, n_r: int = 32, n_theta: int = 64) -> np.ndarray:
+def _bandpass(img: np.ndarray, lp: float, hp: float = 8.0) -> np.ndarray:
+    """High-pass (remove ramp) + low-pass (denoise) — the alignment image."""
+    from scipy.ndimage import gaussian_filter
+    return gaussian_filter(img, lp) - gaussian_filter(img, hp)
+
+
+def _to_polar(img: np.ndarray, n_r: int = 36, n_theta: int = 72) -> np.ndarray:
     from scipy.ndimage import map_coordinates
-
     s = img.shape[0]
     c = (s - 1) / 2
     r = np.linspace(1, s / 2 - 1, n_r)
@@ -53,53 +75,114 @@ def _to_polar(img: np.ndarray, n_r: int = 32, n_theta: int = 64) -> np.ndarray:
     return map_coordinates(img, [c + R * np.sin(TH), c + R * np.cos(TH)], order=1)
 
 
-def _best_angle_bin(img_polar: np.ndarray, ref_polar: np.ndarray) -> tuple[int, float]:
-    """Best angular shift (rotation) of img to match ref, by FFT cross-correlation."""
-    f = np.fft.fft(img_polar, axis=1)
-    g = np.fft.fft(ref_polar, axis=1)
-    cc = np.fft.ifft(f * np.conj(g), axis=1).real.sum(axis=0)
-    k = int(np.argmax(cc))
-    return k, float(cc[k])
+def _best_angle_bin(img_polar: np.ndarray, ref_polar: np.ndarray) -> int:
+    cc = np.fft.ifft(np.fft.fft(img_polar, axis=1) * np.conj(np.fft.fft(ref_polar, axis=1)),
+                     axis=1).real.sum(axis=0)
+    return int(np.argmax(cc))
 
 
-def classify_2d(crops: np.ndarray, n_classes: int = 8, n_iter: int = 5,
-                n_theta: int = 64, seed: int = 0):
-    """Reference-free 2D classification -> (class_averages, labels, counts)."""
-    from scipy.ndimage import rotate
+def _phase_shift(img: np.ndarray, ref: np.ndarray) -> tuple[float, float, float]:
+    """Translation aligning img→ref by phase correlation (sharp peak) + peak score."""
+    F, G = np.fft.fft2(img), np.fft.fft2(ref)
+    R = F * np.conj(G)
+    R /= np.abs(R) + 1e-8                       # phase correlation
+    cc = np.fft.fftshift(np.fft.ifft2(R).real)
+    h, w = img.shape
+    py, px = np.unravel_index(int(np.argmax(cc)), cc.shape)
+    return float(py - h // 2), float(px - w // 2), float(cc.max())
 
+
+def _apply(img: np.ndarray, ang: float, shift) -> np.ndarray:
+    from scipy.ndimage import rotate, fourier_shift
+    out = rotate(img, ang, reshape=False, order=1, mode="nearest") if ang else img
+    if shift[0] or shift[1]:
+        out = np.fft.ifftn(fourier_shift(np.fft.fftn(out), shift)).real
+    return out
+
+
+def _align(crop_polar, crop_bp, ref_polar, ref_bp, n_theta):
+    b = _best_angle_bin(crop_polar, ref_polar)
+    ang = -b * 360.0 / n_theta
+    r = _apply(crop_bp, ang, (0, 0))
+    dy, dx, score = _phase_shift(r, ref_bp)
+    return ang, (dy, dx), score
+
+
+def _rot_invariant_features(crops_bp, n_theta=72):
+    """Rotation-invariant descriptor: |FFT over theta| of each polar image."""
+    feats = []
+    for c in crops_bp:
+        pol = _to_polar(c, n_theta=n_theta)
+        feats.append(np.abs(np.fft.fft(pol, axis=1))[:, :n_theta // 4].ravel())
+    return np.asarray(feats, np.float32)
+
+
+def _kmeanspp(feat, k, rng):
+    n = len(feat)
+    idx = [int(rng.integers(n))]
+    d2 = ((feat - feat[idx[0]]) ** 2).sum(1)
+    for _ in range(1, k):
+        nxt = int(rng.choice(n, p=d2 / (d2.sum() + 1e-12)))
+        idx.append(nxt)
+        d2 = np.minimum(d2, ((feat - feat[nxt]) ** 2).sum(1))
+    return idx
+
+
+def classify_2d(crops: np.ndarray, n_classes: int = 8, n_iter: int = 12,
+                n_theta: int = 72, seed: int = 0):
+    """Reference-free 2D classification (translation+rotation E-M, resolution-annealed)."""
     n = len(crops)
     if n == 0:
         return np.zeros((0,) + crops.shape[1:]), np.zeros(0, int), np.zeros(0, int)
     k = min(n_classes, n)
     s = crops.shape[1]
-    polars = np.stack([_to_polar(c, n_theta=n_theta) for c in crops])
+    mask = _soft_mask(s)
+    crops = crops * mask
 
-    rng = np.random.default_rng(seed)
-    refs = crops[rng.choice(n, size=k, replace=False)].copy()
+    # rotation-invariant PCA + k-means++ init (no random seeds)
+    init_bp = np.stack([_bandpass(c, 2.0) for c in crops]) * mask
+    feat = _rot_invariant_features(init_bp, n_theta)
+    feat = feat - feat.mean(0)
+    _, _, vt = np.linalg.svd(feat, full_matrices=False)
+    pca = feat @ vt[:min(16, vt.shape[0])].T
+    idx = _kmeanspp(pca, k, np.random.default_rng(seed))
+    refs = crops[idx].copy()
+
+    polars = None
     labels = np.zeros(n, int)
-    for _ in range(n_iter):
-        ref_polars = np.stack([_to_polar(r, n_theta=n_theta) for r in refs])
-        best_k = np.zeros(n, int)
-        best_bin = np.zeros(n, int)
+    counts = np.zeros(k, int)
+    for it in range(n_iter):
+        lp = max(3.0 - 2.0 * it / max(n_iter - 1, 1), 1.0)        # anneal: coarse→fine
+        crops_bp = np.stack([_bandpass(c, lp) for c in crops]) * mask
+        polars = [_to_polar(c, n_theta=n_theta) for c in crops_bp]
+        refs_bp = np.stack([_bandpass(r, lp) for r in refs]) * mask
+        ref_polars = [_to_polar(r, n_theta=n_theta) for r in refs_bp]
+
+        bk = np.zeros(n, int); bang = np.zeros(n); bsh = np.zeros((n, 2)); bscore = np.zeros(n)
         for i in range(n):
-            scores, bins = [], []
+            best_j, best_s, ba, bs = 0, -1e30, 0.0, (0.0, 0.0)
             for j in range(k):
-                b, sc = _best_angle_bin(polars[i], ref_polars[j])
-                scores.append(sc)
-                bins.append(b)
-            j = int(np.argmax(scores))
-            best_k[i] = j
-            best_bin[i] = bins[j]
-        labels = best_k
-        new_refs = np.zeros_like(refs)
-        counts = np.zeros(k, int)
-        for i in range(n):
-            ang = -best_bin[i] * 360.0 / n_theta
-            new_refs[best_k[i]] += rotate(crops[i], ang, reshape=False, order=1)
-            counts[best_k[i]] += 1
+                ang, sh, score = _align(polars[i], crops_bp[i], ref_polars[j], refs_bp[j], n_theta)
+                if score > best_s:
+                    best_s, best_j, ba, bs = score, j, ang, sh
+            bk[i], bang[i], bsh[i], bscore[i] = best_j, ba, bs, best_s
+        labels = bk
+
+        new = np.zeros_like(refs); counts = np.zeros(k, int)
         for j in range(k):
-            if counts[j] > 0:
-                refs[j] = new_refs[j] / counts[j]
+            members = np.where(bk == j)[0]
+            if len(members) == 0:
+                continue
+            if len(members) >= 8:        # outlier rejection: drop lowest-scoring 15%
+                thr = np.quantile(bscore[members], 0.15)
+                members = members[bscore[members] >= thr]
+            for i in members:
+                new[j] += _apply(crops[i], bang[i], bsh[i])
+            counts[j] = len(members)
+            refs[j] = new[j] / max(counts[j], 1)
+
+    from scipy.ndimage import gaussian_filter
+    refs = np.stack([gaussian_filter(r, 0.6) * mask for r in refs])
     order = np.argsort(-counts)
     return refs[order], labels, counts[order]
 
