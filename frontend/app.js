@@ -184,6 +184,7 @@ function App() {
   const [selEmpiar, setSelEmpiar] = useState(null);
   const [f1hist, setF1] = useState([]);
   const [classes, setClasses] = useState(null);
+  const [bench, setBench] = useState(null);
   const [busy2d, setBusy2d] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [timeline, setTimeline] = useState([]);
@@ -478,6 +479,15 @@ function App() {
           ${classes ? html`<div class="montage">${classes.classes.map((c, i) =>
             html`<figure key=${i}><img src=${c.png} /><figcaption>${c.count} ptcls</figcaption></figure>`)}</div>
             <div class="note">${classes.n_particles} kept particles → coherent protein density = real picks.</div>` : null}
+        </div>
+
+        <div class="divider"></div>
+        <div class="group">
+          <h4>Benchmark</h4>
+          <button class="sm" onClick=${() => G('/api/benchmark').then(setBench)}>Show picking benchmark</button>
+          ${bench ? html`<img src=${bench.png} style=${{ width: '100%', marginTop: '8px', borderRadius: '6px' }} />
+            <div class="note">We improved our held-out picking F1 <b>${bench.old} → ${bench.new}</b> (+${bench.delta_pct}%).
+              Published DL pickers shown for context (different eval). The picker is swappable; our contribution is the live junk-triage layer.</div>` : null}
         </div>
       </div>
     </div>

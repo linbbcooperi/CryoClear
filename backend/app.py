@@ -731,6 +731,51 @@ def api_export_report(empiar: str):
                     headers={"Content-Disposition": "attachment; filename=cryoclear_report.pdf"})
 
 
+@app.get("/api/benchmark")
+def api_benchmark():
+    """Honest two-zone benchmark: our picker improvement (same harness, held-out) vs
+    published deep-learning pickers (literature, different eval — context only)."""
+    import base64
+    import io
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    ours = [("Old picker\n(LoG blob)", 0.227), ("New picker\n(DoG+NMS+norm)", 0.380),
+            ("+ junk triage", 0.380)]
+    pub = [("Topaz", 0.73), ("crYOLO", 0.75), ("CryoSegNet", 0.76)]
+    fig, ax = plt.subplots(figsize=(8.2, 4.3))
+    fig.patch.set_facecolor("white")
+    xo, xp = [0, 1, 2], [4, 5, 6]
+    ax.bar(xo, [v for _, v in ours], width=0.72, color="#29c393",
+           label="ours — same harness, held-out EMPIAR-10017")
+    ax.bar(xp, [v for _, v in pub], width=0.72, color="#9aa4b2", hatch="//", alpha=0.55,
+           label="published DL pickers — literature, different eval (context)")
+    for x, (_, v) in zip(xo, ours):
+        ax.text(x, v + 0.012, f"{v:.3f}", ha="center", fontsize=9, weight="bold", color="#1a8f6a")
+    for x, (_, v) in zip(xp, pub):
+        ax.text(x, v + 0.012, f"~{v:.2f}", ha="center", fontsize=9, color="#666")
+    ax.axvline(3, color="#bbb", ls=":", lw=1)
+    ax.annotate("+67%", xy=(1, 0.39), xytext=(0.35, 0.56), fontsize=12, color="#1a8f6a",
+                weight="bold", arrowprops=dict(arrowstyle="->", color="#1a8f6a", lw=1.5))
+    ax.set_xticks(xo + xp)
+    ax.set_xticklabels([l for l, _ in ours] + [l for l, _ in pub], fontsize=8)
+    ax.set_ylabel("Picking F1"); ax.set_ylim(0, 0.86)
+    ax.set_title("Picking F1 — EMPIAR-10017 β-galactosidase, held-out", fontsize=11)
+    ax.legend(fontsize=7.5, loc="upper left", framealpha=0.9)
+    ax.spines[["top", "right"]].set_visible(False)
+    fig.text(0.5, -0.04, "Published F1 are reported literature values (different datasets/splits, per-protein "
+             "training; not reproduced here). Ours: greedy radius match, held-out micrographs. The picker is a "
+             "swappable, dependency-light default — CryoClear's contribution is the live junk-triage layer.",
+             fontsize=6.8, ha="center", color="#777", wrap=True)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=115, bbox_inches="tight")
+    plt.close(fig)
+    return {"png": "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode(),
+            "old": 0.227, "new": 0.380, "delta_pct": 67}
+
+
 @app.on_event("startup")
 def _prewarm():
     try:
