@@ -56,10 +56,11 @@ uv run python eval/run_eval.py --demo
 ```
 
 The enterprise app (`backend/` + `frontend/`) is the primary UI: a canvas micrograph
-viewer with pan/zoom, **box-brush** bulk keep/dump HITL, a swappable junk classifier
-(RandomForest / LightGBM / CNN), a live Plotly scoreboard, WebSocket streaming, 2D class
-averages, and `.star`/`.box`/PNG/PDF export. (`app/streamlit_app.py` is a simpler
-Streamlit version kept as a fallback.)
+viewer with pan/zoom, **box-brush** bulk keep/dump HITL with **undo/redo** (Ctrl/Cmd+Z),
+a swappable junk classifier (RandomForest / LightGBM / CNN) with per-model calibrated
+thresholds, a live Plotly scoreboard, WebSocket streaming, 2D class averages,
+**upload-your-own-MRC**, and `.star`/`.box`/PNG/PDF export. (`app/streamlit_app.py` is a
+simpler Streamlit version kept as a fallback.)
 
 ## On the GPU box (RunPod)
 
@@ -98,31 +99,38 @@ MRC micrograph → preprocess (io_mrc) → picker (blob LoG | CryoSegNet/SAM, ca
 
 ## Junk Classifier (swappable baseline)
 
-Three interchangeable backends over the same 8 interpretable per-candidate features
-(mean/std/contrast/edge-density/blobiness…), selectable live in the UI:
+Three interchangeable backends over **23 intensity-normalised per-candidate features**
+— radial profile, matched-filter (Gaussian NCC), structure-tensor edge coherence,
+distribution shape, and sharpness — selectable live in the UI:
 
-- **RandomForest** (scikit-learn) — fast, but overfits in-sample.
-- **LightGBM** (gradient-boosted trees) — best honest tabular accuracy; the default.
+- **RandomForest** (scikit-learn) — fast; over-rejects unless run at a high threshold.
+- **LightGBM** (gradient-boosted trees) — best honest accuracy and threshold-robust; the default.
 - **CNN** (`cnn_classifier.py`, torch on GPU) — learns features from raw 64×64 crops.
 
-Labels come from CryoPPP: a candidate matching a ground-truth particle = keep, else junk.
-Trains/refits in well under a second, so it updates instantly for the live HITL loop.
+Most features are normalised by the per-crop mean/std so they generalise *across*
+micrographs (raw intensity drifts between exposures — that drift is what made the old
+raw mean/min/max features memorise individual micrographs). Richer features lifted
+LightGBM's held-out junk-F1 from **0.47 → 0.64**. Labels come from CryoPPP (a candidate
+matching a ground-truth particle = keep, else junk); refits in well under a second.
 
 ## Evaluation & Metrics (honest — read this)
 
-On EMPIAR-10017 β-galactosidase (real CryoPPP ground truth), **micrograph-level held-out**:
+On EMPIAR-10017 β-galactosidase (real CryoPPP ground truth), **micrograph-level held-out**
+picking F1 (raw blob picks = **0.227**). Threshold matters as much as the model:
 
-| classifier | in-sample picking F1 | **held-out** picking F1 | reading |
+| classifier | held-out @ default 0.5 | **@ calibrated threshold** | note |
 |---|---|---|---|
-| RandomForest | 0.998 | **0.025** | memorizes — the "wow" number is overfitting |
-| LightGBM | 0.27 | **0.234** | honest, generalizes (the default) |
-| CNN | 0.25 | 0.248 | comparable |
+| RandomForest | **0.000** (rejects everything) | 0.248 @ 0.85 | needs a high threshold |
+| LightGBM (default) | 0.228 | **0.248** @ 0.60 | robust to threshold |
+| CNN | — | 0.248 @ 0.50 | learned on raw crops |
 
-The blunt truth: the blob picker over-picks background that **resembles** the small,
-low-contrast β-gal particles, so the honest junk-triage gain is **modest** (raw picking
-F1 ≈ 0.22 → ≈ 0.23–0.25 held-out). No classifier fixes that — a **stronger picker**
-(Topaz) or a **distinct-junk protein** (visible ice/carbon) is the real lever. We report
-held-out numbers on purpose; in-sample numbers are optimistic.
+Two honest takeaways: (1) **per-model threshold calibration** is essential — a vanilla RF
+at 0.5 collapses to F1 0.0, so the app snaps each classifier to its calibrated default;
+(2) the blob picker over-picks background that **resembles** the small, low-contrast β-gal
+particles, so even the best classifier only lifts picking F1 **0.227 → 0.248**. No
+classifier fixes that — a **stronger picker** (Topaz) or a **distinct-junk protein**
+(visible ice/carbon) is the real lever. We report held-out numbers on purpose; the
+in-sample ≈0.998 a vanilla RF shows is overfitting.
 
 CryoSegNet runs on the GPU (incl. NVIDIA Blackwell via a torch-cu128 env) but under-picks
 β-gal with default settings (recall ≈ 0.11).
