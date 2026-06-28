@@ -4,7 +4,15 @@
 
 CryoClear sits on top of any picker, classifies each candidate as keep or junk (ice, carbon edges, aggregates) as micrographs stream in, lets the scientist correct it in bulk on an interactive canvas, learns from those corrections live, and reports honest precision/recall/F1 against expert ground truth — then exports clean coordinates for RELION/cryoSPARC.
 
-> **Honest positioning:** we do **not** claim a novel picking model or a novel ML algorithm. The contribution is the **product**: an open, interactive, real-time junk-triage platform with a live HITL learning loop and honest measurement, on a single GPU. The junk classifier is a deliberately simple, swappable baseline (RandomForest / LightGBM / CNN).
+> **Honest positioning:** we do **not** claim a novel picking model. The contribution is the **product + the live junk‑intelligence layer** that no open tool ships.
+
+### What's novel (and defensible)
+1. **A dedicated, live human‑in‑the‑loop *junk* classifier** — not the picker. Every other tool folds junk removal into the picker or into post‑hoc 2D selection; CryoClear runs a separate keep/ice/carbon/aggregate model that **refits on CPU in under a second from the scientist's clicks while the GPU keeps picking**.
+2. **Uncertainty‑guided active learning** — the app surfaces the candidates the model is *least sure about* (junk‑prob near the threshold, shown in amber); correcting **those** teaches it fastest. Most tools make you hunt; we rank the highest‑value corrections. This is the *active* in active learning.
+3. **One swappable interface over picker × classifier × dataset** — blob / Topaz / CryoSegNet pickers, LightGBM / RF / SGD / CNN classifiers, 7+ proteins, all behind one live UI; switching keeps the same micrograph so differences are obvious.
+4. **Honest, junk‑aware measurement** — CryoPPP ships labeled ice/carbon false positives, so we report junk‑rejection F1 and **kept‑set purity** (which the triage measurably lifts on every micrograph), not just an optimistic picking number.
+
+The closest prior art (TranSPHIRE) retrains the *picker* *automatically*, in batches; CryoClear's loop is **human‑driven, per‑click, sub‑second, and targets junk triage** — and it's open and light enough to run on one GPU.
 
 ## Table of Contents
 
