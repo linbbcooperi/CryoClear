@@ -29,6 +29,7 @@ from cryoclear import (  # noqa: E402
 )
 from cryoclear.active_learning import ActiveLearner  # noqa: E402
 from cryoclear.junk_classifier import JunkClassifier  # noqa: E402
+from cryoclear.stream import StreamStats  # noqa: E402
 
 # optional: pixel-accurate click-to-reject (pip install streamlit-image-coordinates)
 try:
@@ -79,6 +80,11 @@ with st.sidebar:
                         help="Seed a tiny model from a few labels, then teach it corrections "
                              "and watch the junk-rejection F1 climb live.")
     al_seed = st.slider("Seed examples", 10, 200, 30, 10, disabled=not al_on)
+    st.divider()
+    auto_stream = st.checkbox("▶ Auto-stream (M3)", value=False,
+                              help="Feed micrographs on a timer like a live microscope session "
+                                   "and watch the throughput + %junk dashboard update.")
+    stream_speed = st.slider("sec / micrograph", 0.3, 3.0, 1.0, 0.1, disabled=not auto_stream)
     st.caption("M1→M4 build order lives in CLAUDE.md")
 
 RAW = config.RAW / empiar
@@ -197,6 +203,12 @@ if "taught" not in st.session_state:
     st.session_state.taught = 0
 if "al_taught_idx" not in st.session_state:
     st.session_state.al_taught_idx = set()  # candidate indices already labelled this session
+if "stream_stats" not in st.session_state:
+    st.session_state.stream_stats = None    # StreamStats accumulator (M3)
+if "stream_processed" not in st.session_state:
+    st.session_state.stream_processed = set()
+if "junk_history" not in st.session_state:
+    st.session_state.junk_history = []      # %junk per streamed micrograph
 
 # ---------------------------------------------------------------- pick a micrograph
 mic_names = _list_micrographs(empiar)
@@ -281,6 +293,19 @@ n_total = len(pred_disp)
 n_junk = int(is_junk.sum())
 n_keep = n_total - n_junk
 
+# M3: accumulate live streaming stats once per newly-seen micrograph
+if have_real and sel is not None:
+    if st.session_state.stream_stats is None:
+        st.session_state.stream_stats = StreamStats(started=time.time())
+    if sel not in st.session_state.stream_processed:
+        _ss = st.session_state.stream_stats
+        _ss.n_micrographs += 1
+        _ss.n_candidates += n_total
+        _ss.n_kept += n_keep
+        _ss.n_junk += n_junk
+        st.session_state.stream_processed.add(sel)
+        st.session_state.junk_history.append(100.0 * n_junk / n_total if n_total else 0.0)
+
 # ---------------------------------------------------------------- layout
 left, right = st.columns([3, 1], gap="large")
 
@@ -340,6 +365,27 @@ with right:
     if clf is None:
         st.warning("No junk model yet — run scripts/train_junk_classifier.py "
                    f"--empiar {empiar}. Showing all candidates as keep.")
+
+# ---------------------------------------------------------------- streaming dashboard (M3)
+if have_real and st.session_state.stream_stats is not None:
+    ss = st.session_state.stream_stats
+    st.divider()
+    head = "📡 Real-time stream dashboard (M3)"
+    st.subheader(head + ("  · ▶ streaming…" if auto_stream else ""))
+    d1, d2, d3, d4 = st.columns(4)
+    d1.metric("Micrographs streamed", ss.n_micrographs)
+    d2.metric("Throughput", f"{ss.micrographs_per_min:.1f} /min")
+    d3.metric("Particles kept", ss.n_kept)
+    d4.metric("Junk removed", f"{ss.junk_fraction * 100:.1f}%")
+    if len(st.session_state.junk_history) > 1:
+        import pandas as pd
+        st.caption("%junk per micrograph across the streaming session:")
+        st.line_chart(pd.DataFrame({"%junk": st.session_state.junk_history}), height=160)
+    if st.button("↺ Reset stream"):
+        st.session_state.stream_stats = None
+        st.session_state.stream_processed = set()
+        st.session_state.junk_history = []
+        st.rerun()
 
 # ---------------------------------------------------------------- active learning (M2)
 st.divider()
@@ -428,3 +474,9 @@ with st.expander("🔬 2D class averages of kept particles (M4) — proof the pi
 
 st.caption("Pickers: blob (LoG) + CryoSegNet (SAM, cached) · junk classifier: RandomForest · "
            "live active learning · 2D class averages · open source (MIT). M1→M4 in CLAUDE.md.")
+
+# ---------------------------------------------------------------- M3 auto-advance timer
+if auto_stream and have_real and mic_names:
+    time.sleep(stream_speed)
+    st.session_state.stream_i += 1
+    st.rerun()
