@@ -57,10 +57,11 @@ uv run python eval/run_eval.py --demo
 
 The enterprise app (`backend/` + `frontend/`) is the primary UI: a canvas micrograph
 viewer with pan/zoom, **box-brush** bulk keep/dump HITL with **undo/redo** (Ctrl/Cmd+Z),
-a swappable junk classifier (RandomForest / LightGBM / CNN) with per-model calibrated
-thresholds, a live Plotly scoreboard, WebSocket streaming, 2D class averages,
-**upload-your-own-MRC**, and `.star`/`.box`/PNG/PDF export. (`app/streamlit_app.py` is a
-simpler Streamlit version kept as a fallback.)
+a swappable **picker** (blob / Topaz / CryoSegNet), a swappable **junk classifier**
+(RandomForest / LightGBM / CNN) with per-model calibrated thresholds, a **multi-dataset
+switcher** (β-gal / TRPV1 / proteasome), a live Plotly scoreboard, WebSocket streaming, 2D
+class averages, **upload-your-own-MRC**, and `.star`/`.box`/PNG/PDF report export.
+(`app/streamlit_app.py` is a simpler Streamlit version kept as a fallback.)
 
 ## On the GPU box (RunPod)
 
@@ -112,6 +113,18 @@ micrographs (raw intensity drifts between exposures — that drift is what made 
 raw mean/min/max features memorise individual micrographs). Richer features lifted
 LightGBM's held-out junk-F1 from **0.47 → 0.64**. Labels come from CryoPPP (a candidate
 matching a ground-truth particle = keep, else junk); refits in well under a second.
+
+## Pickers (swappable, cached)
+
+The picker is selectable live; the junk classifier then triages whatever it picks:
+
+- **Blob LoG** — fast, deliberately over-picks (the default; junk-triage has the most to do).
+- **Topaz** — pretrained CNN detector (`scripts/run_topaz.py`, GPU); picks cached as `.star`.
+- **CryoSegNet** — SAM + attention-gated U-Net (GPU); picks cached as `.star`.
+
+On β-gal these bracket the trade-off precisely: blob over-picks (~5k candidates/micrograph,
+lots of junk to remove), CryoSegNet under-picks (~hundreds, high-precision). Non-blob picks
+are generated offline on the GPU and cached, so the live app never blocks on inference.
 
 ## Evaluation & Metrics (honest — read this)
 
