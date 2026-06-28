@@ -31,15 +31,14 @@ from backend.precompute import cache_dir, precompute  # noqa: E402
 FRONTEND = Path(__file__).resolve().parents[1] / "frontend"
 app = FastAPI(title="CryoClear")
 
-# Junk-classifier options. `heldout` = best achievable held-out picking F1 (raw blob
-# picks are 0.227); `thr` = the per-model calibrated default threshold from that sweep
-# (eval/compare_classifiers.py). RF must run at a high threshold or it over-rejects
-# (F1 collapses to 0.0 at 0.5); LightGBM is robust and is the default.
+# Held-out picking F1 on EMPIAR-10017 with the DoG+NMS picker (raw blob = 0.373; the
+# stronger picker raised the floor, so the classifier should be conservative — high
+# threshold — and the triage gain is smaller but the absolute number is higher).
 CLF_OPTIONS = {
-    "lgbm": {"label": "LightGBM — boosted trees (robust, default)", "heldout": 0.248, "thr": 0.60},
-    "rf": {"label": "RandomForest — needs high threshold or over-rejects", "heldout": 0.248, "thr": 0.85},
-    "sgd": {"label": "SGD log-loss — fast linear, instant refit (active learning)", "heldout": 0.243, "thr": 0.50},
-    "cnn": {"label": "CNN — learned on raw 64px crops", "heldout": 0.248, "thr": 0.50},
+    "lgbm": {"label": "LightGBM — boosted trees (robust, default)", "heldout": 0.380, "thr": 0.70},
+    "rf": {"label": "RandomForest — high junk-recall, run at a high threshold", "heldout": 0.380, "thr": 0.85},
+    "sgd": {"label": "SGD log-loss — fast linear, instant refit (active learning)", "heldout": 0.380, "thr": 0.80},
+    "cnn": {"label": "CNN — learned on raw 64px crops", "heldout": 0.380, "thr": 0.75},
 }
 
 # Preloaded datasets selectable in the UI. 10017 has CryoPPP ground truth (full metrics);
@@ -661,29 +660,30 @@ def api_export_report(empiar: str):
         ax1.tick_params(labelsize=8)
 
         axT = fig.add_axes([0.55, 0.50, 0.40, 0.21]); axT.axis("off")
-        axT.set_title("Held-out picking F1   (raw blob = 0.227)", fontsize=10, loc="left")
-        rows = [["classifier", "@ 0.5", "@ calib."]]
-        for k in ("rf", "lgbm", "cnn"):
+        axT.set_title("Held-out picking F1   (raw blob = 0.373)", fontsize=10, loc="left")
+        rows = [["classifier", "junk-F1", "@ calib."]]
+        for k in ("rf", "lgbm", "sgd"):
             o = CLF_OPTIONS[k]
-            at05 = {"rf": "0.000", "lgbm": "0.228", "cnn": "—"}[k]
-            rows.append([o["label"].split(" —")[0], at05, f"{o['heldout']:.3f}@{o['thr']:.2f}"])
+            jf = {"rf": "0.77", "lgbm": "0.61", "sgd": "0.47"}[k]
+            rows.append([o["label"].split(" —")[0], jf, f"{o['heldout']:.3f}@{o['thr']:.2f}"])
         tb = axT.table(cellText=rows, loc="center", cellLoc="center", colWidths=[0.46, 0.24, 0.30])
         tb.auto_set_font_size(False); tb.set_fontsize(8.5); tb.scale(1, 1.45)
         for j in range(3):
             tb[0, j].set_facecolor("#2f6feb"); tb[0, j].set_text_props(color="white", weight="bold")
 
         note = (
-            f"Method.  The blob LoG picker over-picks (~{junk_pct:.0f}% of candidates flagged junk). A "
-            f"{s.clf_model.upper()} classifier scores each candidate on 23 intensity-normalised features "
-            "(radial profile, matched-filter NCC, structure-tensor edge coherence, distribution shape, "
-            "sharpness); the scientist corrects it on an interactive canvas and the model can refit live. "
-            "Kept coordinates export to RELION/cryoSPARC as .star/.box.\n\n"
+            f"Method.  A band-pass (DoG) + non-max-suppression picker proposes distinct, particle-like "
+            f"candidates (deliberately over-picking ~2x for triage room, not a dense blanket). A "
+            f"{s.clf_model.upper()} classifier scores each on 23 intensity-normalised features (radial "
+            "profile, matched-filter NCC, structure-tensor edge coherence, distribution shape, sharpness); "
+            "the scientist corrects it on an interactive canvas and the model refits live. Kept coordinates "
+            "export to RELION/cryoSPARC as .star/.box.\n\n"
             "Honesty.  The bars above are in-sample (optimistic); the table is micrograph-level held-out "
-            "(the generalising metric). Per-model threshold calibration is essential — a vanilla "
-            "RandomForest at 0.5 over-rejects and collapses to F1 0.000. The blob picker over-picks "
-            "background that resembles the small, low-contrast particles, so even the best classifier only "
-            "lifts picking F1 from 0.227 to 0.248; a stronger picker or a distinct-junk protein is the real "
-            "lever. Reproduce with eval/compare_classifiers.py.")
+            "(the generalising metric). The improved picker raised held-out raw picking F1 from 0.227 to "
+            "0.373; after triage 0.380. Because the picker is now reasonably precise, the classifier should "
+            "stay conservative (high threshold) — the remaining junk is background that genuinely resembles "
+            "the small, low-contrast particles, so a distinct-junk protein is the next lever. Reproduce with "
+            "eval/compare_classifiers.py.")
         fig.text(0.07, 0.43, note, fontsize=9.5, va="top", linespacing=1.5,
                  wrap=True, color="#222")
         fig.text(0.07, 0.05, "CryoClear · open, real-time cryo-EM junk-triage copilot · MIT",
