@@ -60,25 +60,39 @@ def _f1(real, mask, tj, n_gt):
 
 
 def evalset(data, model_type, test_frac=0.3, seed=0):
+    """Micrograph-level held-out: train on one split, evaluate junk-F1 and picking-F1
+    (both at the default 0.5 threshold and at the threshold that maximises held-out
+    picking-F1 — the honest achievable ceiling)."""
     stems = list(data.keys())
     order = np.random.default_rng(seed).permutation(len(stems))
     test = {stems[i] for i in order[:max(1, int(test_frac * len(stems)))]}
-    Xtr = np.vstack([data[s]["feats"] for s in stems if s not in test and len(data[s]["feats"])])
-    ytr = np.concatenate([data[s]["tj"] for s in stems if s not in test
-                          and len(data[s]["feats"])]).astype(int)
+    train = [s for s in stems if s not in test and len(data[s]["feats"])]
+    Xtr = np.vstack([data[s]["feats"] for s in train])
+    ytr = np.concatenate([data[s]["tj"] for s in train]).astype(int)
     k = ytr != -1
     clf = JunkClassifier(model_type=model_type).fit(Xtr[k], ytr[k])
-    jf, bf, af = [], [], []
+
+    jf, bf, rows = [], [], []
     for s in test:
         ff, tj, pred, n_gt = (data[s][x] for x in ("feats", "tj", "pred", "n_gt"))
         if not len(ff):
             continue
-        pj = np.asarray(clf.predict_is_junk(ff))
-        jf.append(metrics.junk_rejection_metrics(pj, tj == 1)["junk_f1"])
+        proba = clf.predict_junk_proba(ff)
+        jf.append(metrics.junk_rejection_metrics(proba >= 0.5, tj == 1)["junk_f1"])
         real = tj == 0
         bf.append(_f1(real, np.ones(len(pred), bool), tj, n_gt))
-        af.append(_f1(real, ~pj, tj, n_gt))
-    return float(np.mean(jf)), float(np.mean(bf)), float(np.mean(af))
+        rows.append((real, proba, tj, n_gt))
+
+    def mean_after(t):
+        return float(np.mean([_f1(real, proba < t, tj, n_gt) for real, proba, tj, n_gt in rows]))
+
+    af05 = mean_after(0.5)
+    best_t, best_af = 0.5, af05
+    for t in np.linspace(0.1, 0.95, 35):
+        m = mean_after(float(t))
+        if m > best_af:
+            best_af, best_t = m, float(t)
+    return float(np.mean(jf)), float(np.mean(bf)), af05, best_af, best_t
 
 
 def main() -> int:
@@ -92,9 +106,10 @@ def main() -> int:
         datasets.append(("cryosegnet", cs))
     for pname, data in datasets:
         for mt in ("rf", "lgbm"):
-            jf, bf, af = evalset(data, mt)
+            jf, bf, af05, afb, bt = evalset(data, mt)
             print(f"RESULT picker={pname:10s} model={mt:4s}: junkF1={jf:.3f}  "
-                  f"pickF1 raw={bf:.3f} -> after={af:.3f}", flush=True)
+                  f"pickF1 raw={bf:.3f} -> after@0.5={af05:.3f} -> best={afb:.3f}@thr{bt:.2f}",
+                  flush=True)
     return 0
 
 

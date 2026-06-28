@@ -53,8 +53,11 @@ def _process_one(task: dict) -> dict:
     pred_disp = picker.pick(img, backend="blob")
     pred_full = pred_disp * float(factor)
     feats = features.extract_features(imgf, pred_full, box=box)
-    scores = (_CLF.predict_junk_proba(feats) if (_CLF is not None and len(feats))
-              else np.zeros(len(pred_full)))
+    try:
+        scores = (_CLF.predict_junk_proba(feats) if (_CLF is not None and len(feats))
+                  else np.zeros(len(pred_full)))
+    except Exception:        # stale model (e.g. feature-dim change) → real scores come from train_classifiers
+        scores = np.zeros(len(pred_full))
 
     true_junk = np.full(len(pred_full), -1, dtype=np.int8)          # -1 = unknown
     n_gt = 0
@@ -67,14 +70,24 @@ def _process_one(task: dict) -> dict:
             tj[pi] = 0
         true_junk = tj
 
-    np.savez_compressed(
-        out / "data" / f"{mic.stem}.npz",
+    payload = dict(
         pred_disp=pred_disp.astype(np.float32),
         pred_full=pred_full.astype(np.float32),
         scores=scores.astype(np.float32),
         true_junk=true_junk,
         feats=feats.astype(np.float32),
     )
+    # carry over CNN scores (computed on raw crops, independent of these features)
+    # so re-running precompute after a feature change doesn't force a GPU retrain.
+    npz_path = out / "data" / f"{mic.stem}.npz"
+    if npz_path.exists():
+        try:
+            old = np.load(npz_path)
+            if "cnn_scores" in old.files and len(old["cnn_scores"]) == len(pred_full):
+                payload["cnn_scores"] = old["cnn_scores"]
+        except Exception:
+            pass
+    np.savez_compressed(npz_path, **payload)
     return {"stem": mic.stem, "n_picks": int(len(pred_full)),
             "h": int(img.shape[0]), "w": int(img.shape[1]), "n_gt": int(n_gt)}
 

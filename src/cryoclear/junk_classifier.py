@@ -20,23 +20,30 @@ class JunkClassifier:
     signatures, refits in well under a second). Same API for both.
     """
 
-    def __init__(self, model_type: str = "rf", n_estimators: int = 300,
+    def __init__(self, model_type: str = "rf", n_estimators: int = 400,
                  random_state: int = 0):
         self.model_type = model_type
         if model_type == "lgbm":
             from lightgbm import LGBMClassifier
 
+            # more trees + slow LR + explicit regularisation (min_child_samples,
+            # reg_lambda, feature/row subsampling) so it generalises across
+            # micrographs rather than memorising them.
             self.model = LGBMClassifier(
-                n_estimators=400, num_leaves=31, learning_rate=0.05,
-                subsample=0.8, colsample_bytree=0.8, class_weight="balanced",
+                n_estimators=600, num_leaves=63, learning_rate=0.03,
+                min_child_samples=40, subsample=0.8, subsample_freq=1,
+                colsample_bytree=0.8, reg_lambda=1.0, class_weight="balanced",
                 n_jobs=-1, random_state=random_state, verbosity=-1,
             )
         else:
             from sklearn.ensemble import RandomForestClassifier
 
+            # min_samples_leaf + sqrt features + balanced_subsample temper the
+            # in-sample memorisation that makes a vanilla RF report a fake ~1.0.
             self.model = RandomForestClassifier(
-                n_estimators=n_estimators, random_state=random_state,
-                class_weight="balanced", n_jobs=-1,
+                n_estimators=n_estimators, min_samples_leaf=3, max_features="sqrt",
+                class_weight="balanced_subsample", n_jobs=-1,
+                random_state=random_state,
             )
         self._fitted = False
 
