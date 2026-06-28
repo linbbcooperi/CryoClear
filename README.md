@@ -4,6 +4,11 @@
 
 CryoClear sits on top of any picker, classifies each candidate as keep or junk (ice, carbon edges, aggregates) as micrographs stream in, lets the scientist correct it in bulk on an interactive canvas, learns from those corrections live, and reports honest precision/recall/F1 against expert ground truth — then exports clean coordinates for RELION/cryoSPARC.
 
+<p align="center">
+  <img src="docs/img/live-picking.jpg" alt="CryoClear live particle picking with junk triage" width="88%"><br>
+  <sub><b>Live picking on EMPIAR-10017 β-galactosidase</b> — green = kept particle, red = flagged junk, classified in real time.</sub>
+</p>
+
 > **Honest positioning:** we do **not** claim a novel picking model. The contribution is the **product + the live junk‑intelligence layer** that no open tool ships.
 
 ### What's novel (and defensible)
@@ -42,6 +47,11 @@ CryoClear wraps state-of-the-art pickers with an interactive, real-time junk-rem
 - **Classifies picks on the fly** — flags ice patches, carbon edges, and aggregates before they contaminate your stack
 - **Learns from corrections** — every accept/reject from the scientist updates the junk classifier in-session
 - **Reports honest metrics** — precision, recall, and F1 against expert ground truth, so you know exactly how clean your stack is
+
+<p align="center">
+  <img src="docs/img/app.jpg" alt="The CryoClear interactive app" width="90%"><br>
+  <sub>The live app — canvas micrograph viewer, swappable picker + junk classifier, and a live precision / recall / F1 scoreboard.</sub>
+</p>
 
 ---
 
@@ -92,11 +102,26 @@ Full GPU + data + milestone plan: [`docs/07_runpod_build_plan.md`](docs/07_runpo
 | **M3** | Real-time streaming | Auto-feed micrographs on a timer with a live throughput + %junk dashboard. |
 | **M4** | 2D class averages | Reference-free 2D classification of the kept particles → class-average montage (the "these picks are real" proof). |
 
+<table>
+<tr>
+<td width="50%" valign="top"><img src="docs/img/active-learning.jpg" alt="Active-learning junk-rejection F1 climbing as the scientist corrects"><br><sub><b>M2 — live active learning:</b> cold-start junk-blind, then watch junk-rejection F1 climb as you box-brush keep/dump corrections.</sub></td>
+<td width="50%" valign="top"><img src="docs/img/class-averages.jpg" alt="2D class averages of the kept particles"><br><sub><b>M4 — 2D class averages</b> of the kept particles: reference-free alignment + k-means on band-pass crops.</sub></td>
+</tr>
+</table>
+
 Run each: `make app` then toggle the sidebar (Active-learning / Auto-stream) and the
 "2D class averages" expander. CLI: `scripts/run_baseline.py`, `scripts/train_junk_classifier.py`,
 `eval/class_averages.py`, `eval/heldout_eval.py`.
 
 ## Architecture
+
+<p align="center">
+  <img src="docs/img/architecture.png" alt="CryoClear system architecture: swappable picker, the novel junk classifier, and a sub-second human-in-the-loop correction loop" width="100%">
+</p>
+
+Forward data flow in blue, the human-in-the-loop correction loop in green, measurable outputs in gold — with the real module names on each block.
+
+<details><summary>Text version</summary>
 
 ```
 MRC micrograph → preprocess (io_mrc) → picker (blob LoG | CryoSegNet/SAM, cached .star)
@@ -105,6 +130,8 @@ MRC micrograph → preprocess (io_mrc) → picker (blob LoG | CryoSegNet/SAM, ca
    → UI overlay green=keep / red=junk + live metrics (metrics.py) + stream dashboard (stream.py)
    → 2D class averages of kept particles (class2d.py)  → montage
 ```
+
+</details>
 
 ## Junk Classifier (swappable baseline)
 
@@ -137,19 +164,23 @@ are generated offline on the GPU and cached, so the live app never blocks on inf
 ## Evaluation & Metrics (honest — read this)
 
 On EMPIAR-10017 β-galactosidase (real CryoPPP ground truth), **micrograph-level held-out**
-picking F1. We improved the picker substantially (see the in-app **Benchmark** chart):
+picking F1. We improved the picker substantially:
 
 | picker | held-out raw F1 | after triage |
 |---|---|---|
 | Old LoG blob (dense over-pick, ~5000/mic) | 0.227 | 0.248 |
 | **DoG band-pass + NMS + local-norm + carbon exclusion** (~700/mic, distinct) | **0.373→0.380** | **0.380** |
 
+<p align="center">
+  <img src="docs/img/validation.jpg" alt="Candidate picks overlaid on CryoPPP ground truth" width="72%"><br>
+  <sub>Candidate picks overlaid against CryoPPP expert ground-truth positions — how every precision / recall / F1 number here is scored.</sub>
+</p>
+
 That's **+67%** on the raw picking number, and the picks are now distinct and human-like
 (carbon edges excluded) instead of a blanket. Published deep-learning pickers reach
 ~0.73–0.76 F1 *on their own eval protocols* (different splits, per-protein training) — we
-show them in the benchmark for **context, not as a head-to-head**: the picker is a
-swappable, dependency-light default, and CryoClear's contribution is the live junk-triage
-layer, not the picker.
+cite them for **context, not a head-to-head**: the picker is a swappable, dependency-light
+default, and CryoClear's contribution is the live junk-triage layer, not the picker.
 
 Honest notes: per-model **threshold calibration** is essential (a vanilla RF at 0.5
 over-rejects); with the stronger picker the classifier stays conservative (high threshold)
@@ -173,7 +204,7 @@ See [`docs/07_runpod_build_plan.md`](docs/07_runpod_build_plan.md) and
 ## Status
 
 **M1–M4 are all built and running on real data** (EMPIAR-10017). The app is an interactive
-Streamlit copilot; `metrics.py`, `features.py`, `coords.py`, `class2d.py` are tested. Honest
+FastAPI + React copilot (with a Streamlit fallback); `metrics.py`, `features.py`, `coords.py`, `class2d.py` are tested. Honest
 about limits: in-sample picking numbers are optimistic; held-out generalization of the
 *picking* improvement needs threshold calibration (the *junk-rejection* generalizes well).
 

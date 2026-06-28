@@ -1,0 +1,198 @@
+<svg viewBox="0 0 1400 740" xmlns="http://www.w3.org/2000/svg" font-family="Inter, Arial, sans-serif">
+  <defs>
+    <marker id="arrowBlue" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,1 L9,5 L0,9 Z" fill="#4ea1ff"/>
+    </marker>
+    <marker id="arrowGray" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,1 L9,5 L0,9 Z" fill="#3a4a60"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="12" markerHeight="12" refX="9" refY="5.5" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,1 L10,5.5 L0,10 Z" fill="#2ad29b"/>
+    </marker>
+    <marker id="arrowGold" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,1 L9,5 L0,9 Z" fill="#e9b949"/>
+    </marker>
+    <filter id="greenGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="9" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <radialGradient id="hubFill" cx="50%" cy="42%" r="75%">
+      <stop offset="0%" stop-color="#16302a"/>
+      <stop offset="60%" stop-color="#11211c"/>
+      <stop offset="100%" stop-color="#101a16"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="0" y="0" width="1400" height="740" fill="#0a0e14"/>
+
+  <!-- product tagline bar -->
+  <g>
+    <rect x="477" y="22" width="360" height="34" rx="17" fill="#0e1520" stroke="#1f2a3a"/>
+    <text x="657" y="44" fill="#2ad29b" font-size="13" font-weight="700" text-anchor="middle" letter-spacing="2">OPEN · REAL-TIME · SINGLE GPU · MIT</text>
+  </g>
+
+  <!-- ================= LEFT INPUT CHAIN ================= -->
+  <!-- MRC Stream -->
+  <g>
+    <rect x="40" y="60" width="240" height="78" rx="12" fill="#121a26" stroke="#1f2a3a"/>
+    <text x="60" y="93" fill="#eaf1f9" font-size="16" font-weight="700">MRC Micrograph Stream</text>
+    <text x="60" y="115" fill="#8a98ad" font-size="13">real-time simulator feeds frames</text>
+    <text x="60" y="132" fill="#5f6e84" font-size="12">stream.py · io_mrc.py</text>
+  </g>
+  <!-- arrow -->
+  <line x1="160" y1="138" x2="160" y2="172" stroke="#4ea1ff" stroke-width="1.6" marker-end="url(#arrowBlue)"/>
+
+  <!-- Preprocess -->
+  <g>
+    <rect x="40" y="176" width="240" height="72" rx="12" fill="#121a26" stroke="#1f2a3a"/>
+    <text x="60" y="207" fill="#eaf1f9" font-size="16" font-weight="700">Preprocess</text>
+    <text x="60" y="228" fill="#8a98ad" font-size="13">read · normalize · downsample</text>
+    <text x="60" y="244" fill="#5f6e84" font-size="12">io_mrc.py</text>
+  </g>
+  <line x1="160" y1="248" x2="160" y2="282" stroke="#4ea1ff" stroke-width="1.6" marker-end="url(#arrowBlue)"/>
+
+  <!-- Picker (swappable) -->
+  <g>
+    <rect x="40" y="286" width="240" height="118" rx="12" fill="#121a26" stroke="#1f2a3a"/>
+    <text x="60" y="315" fill="#eaf1f9" font-size="16" font-weight="700">Picker</text>
+    <text x="178" y="315" fill="#4ea1ff" font-size="12" font-weight="700">SWAPPABLE</text>
+    <text x="60" y="335" fill="#8a98ad" font-size="13">candidate boxes</text>
+    <!-- chips -->
+    <g font-size="12">
+      <rect x="60" y="345" width="58" height="22" rx="11" fill="#0e1520" stroke="#1f2a3a"/>
+      <text x="89" y="360" fill="#eaf1f9" text-anchor="middle">Blob</text>
+      <rect x="124" y="345" width="60" height="22" rx="11" fill="#0e1520" stroke="#1f2a3a"/>
+      <text x="154" y="360" fill="#eaf1f9" text-anchor="middle">Topaz</text>
+      <rect x="190" y="345" width="84" height="22" rx="11" fill="#0e1520" stroke="#1f2a3a"/>
+      <text x="232" y="360" fill="#eaf1f9" text-anchor="middle">CryoSegNet</text>
+    </g>
+    <text x="60" y="392" fill="#5f6e84" font-size="12">picker.py · coords.py (.star cache)</text>
+  </g>
+
+  <!-- arrow picker -> features -->
+  <line x1="160" y1="404" x2="160" y2="440" stroke="#4ea1ff" stroke-width="1.6" marker-end="url(#arrowBlue)"/>
+
+  <!-- Features -->
+  <g>
+    <rect x="40" y="444" width="240" height="96" rx="12" fill="#121a26" stroke="#1f2a3a"/>
+    <text x="60" y="475" fill="#eaf1f9" font-size="16" font-weight="700">Per-Candidate Features</text>
+    <text x="60" y="497" fill="#8a98ad" font-size="13">23 features · radial profile,</text>
+    <text x="60" y="514" fill="#8a98ad" font-size="13">edge coherence, sharpness</text>
+    <text x="60" y="531" fill="#5f6e84" font-size="12">features.py</text>
+  </g>
+
+  <!-- features -> hub (into the heart) -->
+  <path d="M280 490 C 360 490, 380 415, 470 415" fill="none" stroke="#4ea1ff" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <text x="318" y="455" fill="#8a98ad" font-size="12">feature vectors</text>
+
+  <!-- ================= CENTRAL HUB: JUNK CLASSIFIER ================= -->
+  <g filter="url(#greenGlow)">
+    <rect x="478" y="250" width="358" height="240" rx="16" fill="url(#hubFill)" stroke="#2ad29b" stroke-width="2.4"/>
+  </g>
+  <text x="657" y="296" fill="#eaf1f9" font-size="23" font-weight="700" text-anchor="middle">Junk Classifier</text>
+  <text x="657" y="320" fill="#2ad29b" font-size="13" font-weight="700" text-anchor="middle">THE NOVEL CORE</text>
+  <text x="657" y="345" fill="#8a98ad" font-size="13" text-anchor="middle">labels each candidate · keep vs junk</text>
+  <text x="657" y="364" fill="#8a98ad" font-size="13" text-anchor="middle">(ice · carbon · aggregate)</text>
+
+  <!-- model chips -->
+  <g font-size="12" text-anchor="middle">
+    <rect x="500" y="384" width="76" height="24" rx="12" fill="#0e1520" stroke="#2ad29b"/>
+    <text x="538" y="400" fill="#eaf1f9">LightGBM</text>
+    <rect x="584" y="384" width="106" height="24" rx="12" fill="#0e1520" stroke="#1f2a3a"/>
+    <text x="637" y="400" fill="#eaf1f9">RandomForest</text>
+    <rect x="698" y="384" width="62" height="24" rx="12" fill="#0e1520" stroke="#1f2a3a"/>
+    <text x="729" y="400" fill="#eaf1f9">SGD</text>
+    <rect x="768" y="384" width="50" height="24" rx="12" fill="#0e1520" stroke="#1f2a3a"/>
+    <text x="793" y="400" fill="#eaf1f9">CNN</text>
+  </g>
+
+  <!-- keep/junk legend inside -->
+  <g font-size="13">
+    <circle cx="544" cy="436" r="7" fill="#2ad29b"/>
+    <text x="558" y="441" fill="#eaf1f9">Keep</text>
+    <circle cx="640" cy="436" r="7" fill="#e7635b"/>
+    <text x="654" y="441" fill="#eaf1f9">Junk</text>
+  </g>
+  <text x="657" y="470" fill="#5f6e84" font-size="12" text-anchor="middle">junk_classifier.py · swappable backend</text>
+
+  <!-- ================= RIGHT: CANVAS UI + SCIENTIST ================= -->
+  <g>
+    <rect x="1010" y="250" width="350" height="240" rx="14" fill="#121a26" stroke="#1f2a3a"/>
+    <text x="1032" y="284" fill="#eaf1f9" font-size="17" font-weight="700">Canvas UI + Scientist</text>
+    <text x="1032" y="305" fill="#8a98ad" font-size="13">pan / zoom · box-brush corrections</text>
+    <!-- mini canvas mock -->
+    <rect x="1032" y="318" width="306" height="118" rx="8" fill="#0e1520" stroke="#1f2a3a"/>
+    <!-- particles keep (green) -->
+    <rect x="1052" y="338" width="26" height="26" rx="4" fill="none" stroke="#2ad29b" stroke-width="2"/>
+    <rect x="1100" y="356" width="26" height="26" rx="4" fill="none" stroke="#2ad29b" stroke-width="2"/>
+    <rect x="1158" y="332" width="26" height="26" rx="4" fill="none" stroke="#2ad29b" stroke-width="2"/>
+    <rect x="1208" y="372" width="26" height="26" rx="4" fill="none" stroke="#2ad29b" stroke-width="2"/>
+    <!-- junk (red) -->
+    <rect x="1076" y="392" width="26" height="26" rx="4" fill="none" stroke="#e7635b" stroke-width="2"/>
+    <rect x="1268" y="346" width="26" height="26" rx="4" fill="none" stroke="#e7635b" stroke-width="2"/>
+    <!-- box-brush highlight -->
+    <rect x="1148" y="380" width="60" height="40" rx="4" fill="#2ad29b" fill-opacity="0.12" stroke="#2ad29b" stroke-dasharray="4 3"/>
+    <text x="1032" y="460" fill="#8a98ad" font-size="13">green = keep · red = junk · WebSocket live</text>
+    <text x="1032" y="479" fill="#5f6e84" font-size="12">frontend/app.js · backend/app.py (FastAPI)</text>
+  </g>
+
+  <!-- ===== HITL CLOSED LOOP (two green arrows) ===== -->
+  <!-- predict: hub -> UI (top) -->
+  <path d="M836 320 C 910 300, 940 300, 1010 312" fill="none" stroke="#2ad29b" stroke-width="2.4" marker-end="url(#arrowGreen)"/>
+  <text x="922" y="294" fill="#2ad29b" font-size="13" font-weight="600" text-anchor="middle">predict keep / junk overlay</text>
+
+  <!-- corrections refit: UI -> hub (bottom, curved, the differentiator — the money arrow) -->
+  <path d="M1010 432 C 935 470, 905 470, 836 438" fill="none" stroke="#2ad29b" stroke-width="4.4" marker-end="url(#arrowGreen)"/>
+  <rect x="814" y="446" width="194" height="40" rx="10" fill="#0e1520" stroke="#2ad29b" stroke-width="1.4"/>
+  <text x="911" y="465" fill="#2ad29b" font-size="14" font-weight="700" text-anchor="middle">corrections refit &lt;1s</text>
+  <text x="911" y="480" fill="#8a98ad" font-size="11.5" text-anchor="middle">HITL · active_learning.py</text>
+
+  <!-- loop label cycle hint -->
+  <text x="923" y="240" fill="#5f6e84" font-size="12" text-anchor="middle">closed feedback loop — the differentiator</text>
+
+  <!-- ================= OUTPUTS (bottom, gold) ================= -->
+  <!-- branch arrow from hub down -->
+  <path d="M620 490 C 620 540, 360 540, 300 580" fill="none" stroke="#e9b949" stroke-width="1.8" marker-end="url(#arrowGold)"/>
+  <path d="M657 490 L 657 580" fill="none" stroke="#e9b949" stroke-width="1.8" marker-end="url(#arrowGold)"/>
+  <path d="M700 490 C 760 540, 960 545, 1010 580" fill="none" stroke="#e9b949" stroke-width="1.8" marker-end="url(#arrowGold)"/>
+  <text x="690" y="528" fill="#5f6e84" font-size="12">kept particles →</text>
+
+  <!-- Metrics -->
+  <g>
+    <rect x="150" y="584" width="300" height="118" rx="12" fill="#121a26" stroke="#1f2a3a"/>
+    <rect x="150" y="584" width="6" height="118" rx="3" fill="#e9b949"/>
+    <text x="174" y="615" fill="#eaf1f9" font-size="16" font-weight="700">Live Metrics</text>
+    <text x="174" y="638" fill="#8a98ad" font-size="13">precision · recall · F1 vs CryoPPP GT</text>
+    <text x="174" y="657" fill="#8a98ad" font-size="13">junk-rejection F1 · throughput</text>
+    <text x="174" y="690" fill="#5f6e84" font-size="12">metrics.py</text>
+  </g>
+
+  <!-- Clean Export -->
+  <g>
+    <rect x="478" y="584" width="358" height="118" rx="12" fill="#121a26" stroke="#1f2a3a"/>
+    <rect x="478" y="584" width="6" height="118" rx="3" fill="#e9b949"/>
+    <text x="502" y="615" fill="#eaf1f9" font-size="16" font-weight="700">Clean Export</text>
+    <text x="502" y="638" fill="#8a98ad" font-size="13">junk-free .star / .box particle set</text>
+    <text x="502" y="657" fill="#8a98ad" font-size="13">→ RELION / cryoSPARC ready</text>
+    <text x="502" y="690" fill="#5f6e84" font-size="12">coords.py</text>
+  </g>
+
+  <!-- 2D Class Averages -->
+  <g>
+    <rect x="864" y="584" width="350" height="118" rx="12" fill="#121a26" stroke="#1f2a3a"/>
+    <rect x="864" y="584" width="6" height="118" rx="3" fill="#e9b949"/>
+    <text x="888" y="615" fill="#eaf1f9" font-size="16" font-weight="700">2D Class Averages</text>
+    <text x="888" y="638" fill="#8a98ad" font-size="13">reference-free · kept particles only</text>
+    <!-- tiny montage -->
+    <g>
+      <rect x="888" y="650" width="22" height="22" rx="3" fill="#0e1520" stroke="#1f2a3a"/>
+      <circle cx="899" cy="661" r="7" fill="#2a3a52"/>
+      <rect x="916" y="650" width="22" height="22" rx="3" fill="#0e1520" stroke="#1f2a3a"/>
+      <circle cx="927" cy="661" r="7" fill="#33455f"/>
+      <rect x="944" y="650" width="22" height="22" rx="3" fill="#0e1520" stroke="#1f2a3a"/>
+      <circle cx="955" cy="661" r="7" fill="#2a3a52"/>
+    </g>
+    <text x="888" y="690" fill="#5f6e84" font-size="12">class2d.py</text>
+  </g>
+
+</svg>
