@@ -289,6 +289,14 @@ async def ws_stream(ws: WebSocket):
 
 
 # ---------------------------------------------------------------- frontend
+@app.on_event("startup")
+def _prewarm():
+    try:
+        get_state()   # build the default-dataset State so the first request is instant
+    except Exception:
+        pass
+
+
 @app.get("/")
 def index():
     return FileResponse(FRONTEND / "index.html")
