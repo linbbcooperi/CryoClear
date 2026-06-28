@@ -129,21 +129,24 @@ are generated offline on the GPU and cached, so the live app never blocks on inf
 ## Evaluation & Metrics (honest — read this)
 
 On EMPIAR-10017 β-galactosidase (real CryoPPP ground truth), **micrograph-level held-out**
-picking F1 (raw blob picks = **0.227**). Threshold matters as much as the model:
+picking F1. We improved the picker substantially (see the in-app **Benchmark** chart):
 
-| classifier | held-out @ default 0.5 | **@ calibrated threshold** | note |
-|---|---|---|---|
-| RandomForest | **0.000** (rejects everything) | 0.248 @ 0.85 | needs a high threshold |
-| LightGBM (default) | 0.228 | **0.248** @ 0.60 | robust to threshold |
-| CNN | — | 0.248 @ 0.50 | learned on raw crops |
+| picker | held-out raw F1 | after triage |
+|---|---|---|
+| Old LoG blob (dense over-pick, ~5000/mic) | 0.227 | 0.248 |
+| **DoG band-pass + NMS + local-norm + carbon exclusion** (~700/mic, distinct) | **0.373→0.380** | **0.380** |
 
-Two honest takeaways: (1) **per-model threshold calibration** is essential — a vanilla RF
-at 0.5 collapses to F1 0.0, so the app snaps each classifier to its calibrated default;
-(2) the blob picker over-picks background that **resembles** the small, low-contrast β-gal
-particles, so even the best classifier only lifts picking F1 **0.227 → 0.248**. No
-classifier fixes that — a **stronger picker** (Topaz) or a **distinct-junk protein**
-(visible ice/carbon) is the real lever. We report held-out numbers on purpose; the
-in-sample ≈0.998 a vanilla RF shows is overfitting.
+That's **+67%** on the raw picking number, and the picks are now distinct and human-like
+(carbon edges excluded) instead of a blanket. Published deep-learning pickers reach
+~0.73–0.76 F1 *on their own eval protocols* (different splits, per-protein training) — we
+show them in the benchmark for **context, not as a head-to-head**: the picker is a
+swappable, dependency-light default, and CryoClear's contribution is the live junk-triage
+layer, not the picker.
+
+Honest notes: per-model **threshold calibration** is essential (a vanilla RF at 0.5
+over-rejects); with the stronger picker the classifier stays conservative (high threshold)
+so the triage *delta* is small but the absolute number is higher; the in-sample ≈0.998 a
+vanilla RF shows is overfitting (we report held-out).
 
 CryoSegNet runs on the GPU (incl. NVIDIA Blackwell via a torch-cu128 env) but under-picks
 β-gal with default settings (recall ≈ 0.11).

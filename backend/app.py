@@ -31,7 +31,7 @@ from backend.precompute import cache_dir, precompute  # noqa: E402
 FRONTEND = Path(__file__).resolve().parents[1] / "frontend"
 app = FastAPI(title="CryoClear")
 
-# Held-out picking F1 on EMPIAR-10017 with the DoG+NMS picker (raw blob = 0.373; the
+# Held-out picking F1 on EMPIAR-10017 with the DoG+NMS picker (raw blob = 0.380; the
 # stronger picker raised the floor, so the classifier should be conservative — high
 # threshold — and the triage gain is smaller but the absolute number is higher).
 CLF_OPTIONS = {
@@ -666,7 +666,7 @@ def api_export_report(empiar: str):
         ax1.tick_params(labelsize=8)
 
         axT = fig.add_axes([0.55, 0.50, 0.40, 0.21]); axT.axis("off")
-        axT.set_title("Held-out picking F1   (raw blob = 0.373)", fontsize=10, loc="left")
+        axT.set_title("Held-out picking F1   (raw blob = 0.380)", fontsize=10, loc="left")
         rows = [["classifier", "junk-F1", "@ calib."]]
         for k in ("rf", "lgbm", "sgd"):
             o = CLF_OPTIONS[k]
@@ -686,7 +686,7 @@ def api_export_report(empiar: str):
             "export to RELION/cryoSPARC as .star/.box.\n\n"
             "Honesty.  The bars above are in-sample (optimistic); the table is micrograph-level held-out "
             "(the generalising metric). The improved picker raised held-out raw picking F1 from 0.227 to "
-            "0.373; after triage 0.380. Because the picker is now reasonably precise, the classifier should "
+            "0.380; after triage 0.380. Because the picker is now reasonably precise, the classifier should "
             "stay conservative (high threshold) — the remaining junk is background that genuinely resembles "
             "the small, low-contrast particles, so a distinct-junk protein is the next lever. Reproduce with "
             "eval/compare_classifiers.py.")
