@@ -114,7 +114,7 @@ def montage(class_avgs: np.ndarray, counts=None, cols: int = 4):
     out = np.zeros((rows * (s + pad) + pad, cols * (s + pad) + pad), dtype=np.float32)
     for idx, avg in enumerate(class_avgs):
         r, c = divmod(idx, cols)
-        a = (avg - avg.min()) / (avg.ptp() + 1e-6)
+        a = (avg - avg.min()) / (np.ptp(avg) + 1e-6)
         out[pad + r * (s + pad):pad + r * (s + pad) + s,
             pad + c * (s + pad):pad + c * (s + pad) + s] = a
     return out
