@@ -26,11 +26,22 @@ class ActiveLearner:
         return self
 
     def add_corrections(self, features: np.ndarray, is_junk) -> dict:
-        """Add user corrections (rejected junk / confirmed particles) and refit."""
-        for f, j in zip(np.asarray(features, dtype=float), np.asarray(is_junk).astype(int)):
+        """Add user corrections (rejected junk / confirmed particles).
+
+        For the ``sgd`` backend this is a true incremental ``partial_fit`` on only the new
+        labels (O(1) per click — the smooth, lag-free "watch it learn" loop); rf/lgbm fall
+        back to a full refit from the running buffer.
+        """
+        Xn = np.asarray(features, dtype=float)
+        yn = np.asarray(is_junk).astype(int)
+        for f, j in zip(Xn, yn):
             self._X.append(f)
             self._y.append(int(j))
-        self._refit()
+        if (getattr(self.clf, "model_type", "") == "sgd" and self.clf._fitted
+                and len(set(self._y)) >= 2 and len(Xn)):
+            self.clf.update(Xn, yn)          # incremental — no full retrain
+        else:
+            self._refit()
         return {"n_labels": len(self._y), "n_junk": int(sum(self._y))}
 
     def _refit(self) -> None:

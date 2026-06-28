@@ -446,8 +446,8 @@ function App() {
     </div>
 
     <div class="ftr">
-      <span>pickers: blob (LoG) + CryoSegNet (SAM)</span>
-      <span>junk classifier: RandomForest</span>
+      <span>picker: ${(info.picker_menu && info.picker_menu[picker] && info.picker_menu[picker].label) || picker}</span>
+      <span>junk classifier: ${(info.clf_options && info.clf_options[clfModel] && info.clf_options[clfModel].label.split(' —')[0]) || clfModel}</span>
       <span>open source · MIT</span>
       <span class="spacer"></span>
       <span class="tag">corrections fed: ${met ? '' : ''}${(f1hist.length)}</span>

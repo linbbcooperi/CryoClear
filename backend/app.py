@@ -114,7 +114,7 @@ class State:
         self.overrides: dict[str, dict] = {}   # {stem: {idx: label}} manual HITL corrections
         self.undo_stack: list[dict] = []       # each: {stem, prev:{idx: prior_label_or_None}}
         self.redo_stack: list[dict] = []
-        self.learner = ActiveLearner(JunkClassifier())
+        self.learner = ActiveLearner(JunkClassifier(model_type="sgd"))  # true online partial_fit
         self.coldstart = True
         self.corrections = 0
         self.f1_history: list[float] = []
@@ -148,7 +148,7 @@ class State:
 
     def _seed_learner(self, coldstart: bool):
         tbl = self._train_table()
-        self.learner = ActiveLearner(JunkClassifier())
+        self.learner = ActiveLearner(JunkClassifier(model_type="sgd"))  # true online partial_fit
         self.coldstart = coldstart
         self.corrections = 0
         self.f1_history = []
