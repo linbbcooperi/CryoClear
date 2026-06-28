@@ -57,6 +57,8 @@ class State:
         self.mode = "model"               # "model"=precomputed scores | "learn"=live cold-start AL
         self._npz: dict[str, dict] = {}
         self.overrides: dict[str, dict] = {}   # {stem: {idx: label}} manual HITL corrections
+        self.undo_stack: list[dict] = []       # each: {stem, prev:{idx: prior_label_or_None}}
+        self.redo_stack: list[dict] = []
         self.learner = ActiveLearner(JunkClassifier())
         self.coldstart = True
         self.corrections = 0
@@ -173,6 +175,8 @@ def api_mode(payload: dict):
     if s.mode == "learn":
         s._seed_learner(coldstart=True)
         s.overrides = {}
+        s.undo_stack.clear()
+        s.redo_stack.clear()
     return {"mode": s.mode}
 
 
@@ -197,12 +201,16 @@ async def api_correct(payload: dict):
             s.learner.add_corrections(feats[dump], np.ones(len(dump), int))
         if keep:
             s.learner.add_corrections(feats[keep], np.zeros(len(keep), int))
-    else:                   # model mode: manual per-particle overrides (instant)
+    else:                   # model mode: manual per-particle overrides (instant, undoable)
         ov = s.overrides.setdefault(stem, {})
+        prev = {i: ov.get(i) for i in (*dump, *keep)}   # prior label (None = unset) for undo
         for i in dump:
             ov[i] = 1
         for i in keep:
             ov[i] = 0
+        if prev:
+            s.undo_stack.append({"stem": stem, "prev": prev})
+            s.redo_stack.clear()
     s.corrections += len(dump) + len(keep)
     junk = s.junk_mask(stem)
     d = s.npz(stem)
@@ -211,7 +219,49 @@ async def api_correct(payload: dict):
         s.f1_history.append(jr["junk_f1"])
     return {"stem": stem, "score": s.scores(stem).tolist(),
             "junk": junk.astype(int).tolist(), "corrections": s.corrections,
-            "f1_history": s.f1_history, "picking_after": s.picking(stem, ~junk)}
+            "f1_history": s.f1_history, "picking_after": s.picking(stem, ~junk),
+            "can_undo": bool(s.undo_stack), "can_redo": bool(s.redo_stack)}
+
+
+def _swap_overrides(s: "State", rec: dict) -> dict:
+    """Apply rec['prev'] to the overrides for rec['stem']; return the inverse record."""
+    stem = rec["stem"]
+    ov = s.overrides.setdefault(stem, {})
+    inv = {}
+    for i, val in rec["prev"].items():
+        inv[i] = ov.get(i)
+        if val is None:
+            ov.pop(i, None)
+        else:
+            ov[i] = val
+    return {"stem": stem, "prev": inv}
+
+
+def _undo_redo_result(s: "State", stem: str) -> dict:
+    junk = s.junk_mask(stem)
+    return {"stem": stem, "score": s.scores(stem).tolist(),
+            "junk": junk.astype(int).tolist(), "picking_after": s.picking(stem, ~junk),
+            "can_undo": bool(s.undo_stack), "can_redo": bool(s.redo_stack)}
+
+
+@app.post("/api/undo")
+def api_undo(payload: dict):
+    s = get_state(payload.get("empiar"))
+    if not s.undo_stack:
+        return {"ok": False, "can_undo": False, "can_redo": bool(s.redo_stack)}
+    rec = s.undo_stack.pop()
+    s.redo_stack.append(_swap_overrides(s, rec))
+    return {"ok": True, **_undo_redo_result(s, rec["stem"])}
+
+
+@app.post("/api/redo")
+def api_redo(payload: dict):
+    s = get_state(payload.get("empiar"))
+    if not s.redo_stack:
+        return {"ok": False, "can_undo": bool(s.undo_stack), "can_redo": False}
+    rec = s.redo_stack.pop()
+    s.undo_stack.append(_swap_overrides(s, rec))
+    return {"ok": True, **_undo_redo_result(s, rec["stem"])}
 
 
 @app.post("/api/threshold")
@@ -224,6 +274,10 @@ def api_threshold(payload: dict):
 @app.post("/api/reset")
 def api_reset(payload: dict):
     s = get_state(payload.get("empiar"))
+    s.overrides = {}
+    s.undo_stack.clear()
+    s.redo_stack.clear()
+    s.corrections = 0
     s._seed_learner(coldstart=bool(payload.get("coldstart", False)))
     return {"ok": True, "coldstart": s.coldstart}
 

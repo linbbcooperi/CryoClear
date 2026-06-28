@@ -156,6 +156,8 @@ function App() {
   const [clfModel, setClf] = useState('lgbm');
   const [brush, setBrush] = useState('junk');
   const [tool, setTool] = useState('select');
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
   const [f1hist, setF1] = useState([]);
   const [classes, setClasses] = useState(null);
   const [busy2d, setBusy2d] = useState(false);
@@ -180,14 +182,30 @@ function App() {
     const body = { empiar, stem, dump_idx: b === 'keep' ? [] : sel, keep_idx: b === 'keep' ? sel : [] };
     J('/api/correct', body).then(r => {
       setPicks(p => ({ ...p, score: r.score, junk: r.junk }));
-      setF1(r.f1_history); G(`/api/metrics/${empiar}/${stem}`).then(setMet);
+      setF1(r.f1_history); setCanUndo(!!r.can_undo); setCanRedo(!!r.can_redo);
+      G(`/api/metrics/${empiar}/${stem}`).then(setMet);
     });
   };
+
+  const applyUndoRedo = (r) => {
+    if (!r) return;
+    setCanUndo(!!r.can_undo); setCanRedo(!!r.can_redo);
+    if (!r.ok) return;
+    if (r.stem !== stem && info) {                 // correction was on another micrograph → jump there
+      const j = info.micrographs.findIndex(m => m.stem === r.stem);
+      if (j >= 0) setIdx(j);
+    } else {
+      setPicks(p => ({ ...p, score: r.score, junk: r.junk }));
+      G(`/api/metrics/${empiar}/${stem}`).then(setMet);
+    }
+  };
+  const undo = () => J('/api/undo', { empiar }).then(applyUndoRedo);
+  const redo = () => J('/api/redo', { empiar }).then(applyUndoRedo);
 
   const changeTh = (t) => { setTh(t); J('/api/threshold', { empiar, threshold: t }).then(() => load()); };
   const switchMode = (m) => { setMode(m); J('/api/mode', { empiar, mode: m }).then(() => { setF1([]); load(); }); };
   const switchClf = (m) => { setClf(m); J('/api/clf_model', { empiar, clf_model: m }).then(r => { if (r && r.threshold != null) setTh(r.threshold); load(); }); };
-  const reset = () => { J('/api/reset', { empiar, coldstart: mode === 'learn' }).then(() => { setF1([]); load(); }); };
+  const reset = () => { J('/api/reset', { empiar, coldstart: mode === 'learn' }).then(() => { setF1([]); setCanUndo(false); setCanRedo(false); load(); }); };
   const run2d = () => { setBusy2d(true); J('/api/classify2d', { empiar }).then(r => { setClasses(r); setBusy2d(false); }); };
   const savePng = (type) => {
     const c = document.querySelector('.canvas-wrap canvas'); if (!c) return;
@@ -199,9 +217,17 @@ function App() {
     }, type, 0.92);
   };
 
-  // keyboard k / d / u apply to nothing without a selection; we use brush toggle instead.
+  // keyboard: d/k toggle brush; Ctrl/Cmd+Z undo, Ctrl/Cmd+Shift+Z (or Ctrl+Y) redo.
+  const kbd = useRef({});
+  kbd.current = { undo, redo };
   useEffect(() => {
-    const h = (e) => { if (e.key === 'k') setBrush('keep'); if (e.key === 'd') setBrush('junk'); };
+    const h = (e) => {
+      const meta = e.ctrlKey || e.metaKey;
+      if (meta && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); (e.shiftKey ? kbd.current.redo : kbd.current.undo)(); return; }
+      if (meta && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); kbd.current.redo(); return; }
+      if (!meta && e.key === 'k') setBrush('keep');
+      if (!meta && e.key === 'd') setBrush('junk');
+    };
     window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h);
   }, []);
 
@@ -250,6 +276,9 @@ function App() {
           <span class="lbl">tool:</span>
           <button class=${'sm' + (tool === 'select' ? ' primary' : '')} onClick=${() => setTool('select')}>select</button>
           <button class=${'sm' + (tool === 'pan' ? ' primary' : '')} onClick=${() => setTool('pan')}>pan</button>
+          <div style=${{ width: '12px' }}></div>
+          <button class="sm" disabled=${!canUndo} onClick=${undo} title="Ctrl/Cmd+Z">↶ undo</button>
+          <button class="sm" disabled=${!canRedo} onClick=${redo} title="Ctrl/Cmd+Shift+Z">↷ redo</button>
           <div class="spacer"></div>
           <span class="lbl">scroll = zoom · ${tool === 'pan' ? 'drag = pan' : `drag a box to ${brush} · click toggles one`}</span>
         </div>
