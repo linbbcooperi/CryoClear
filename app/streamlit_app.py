@@ -224,7 +224,15 @@ if al_on and train_tbl is not None and len(feats):
     if st.session_state.al_learner is None or st.session_state.al_seed != al_seed:
         _Xt, _yt = train_tbl
         _rng = np.random.default_rng(0)
-        _idx = _rng.choice(len(_yt), size=min(al_seed, len(_yt)), replace=False)
+        # Cold start: a junk-POOR seed, so the model initially MISSES junk (low junk-F1);
+        # the scientist's corrections then teach it — an honest, visible learning climb.
+        _keep = np.where(_yt == 0)[0]
+        _junk = np.where(_yt == 1)[0]
+        _nj = max(2, al_seed // 10)
+        _nk = max(2, al_seed - _nj)
+        _idx = np.concatenate([
+            _rng.choice(_keep, size=min(_nk, len(_keep)), replace=False),
+            _rng.choice(_junk, size=min(_nj, len(_junk)), replace=False)])
         st.session_state.al_learner = ActiveLearner().seed(_Xt[_idx], _yt[_idx])
         st.session_state.al_seed = al_seed
         st.session_state.f1_history = []
