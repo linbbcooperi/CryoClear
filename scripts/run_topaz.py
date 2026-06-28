@@ -40,10 +40,14 @@ def main() -> int:
     ap.add_argument("--radius", type=int, default=10)     # NMS radius in downsampled px
     ap.add_argument("--model", default="resnet16_u64")    # bundled pretrained detector
     ap.add_argument("--min-score", type=float, default=-2.0)  # permissive → over-pick → triage
+    ap.add_argument("--limit", type=int, default=0, help="cap number of micrographs (0 = all)")
+    ap.add_argument("--workers", type=int, default=16, help="topaz preprocess parallelism")
     args = ap.parse_args()
 
     raw = config.RAW / args.empiar / "micrographs"
     mics = sorted(raw.glob("*.mrc"))
+    if args.limit:
+        mics = mics[:args.limit]
     if not mics:
         print(f"no micrographs in {raw}")
         return 1
@@ -52,9 +56,9 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     proc.mkdir(parents=True, exist_ok=True)
 
-    print(f"preprocess {len(mics)} micrographs (scale {args.scale})…", flush=True)
-    subprocess.run([TOPAZ_BIN, "preprocess", "-s", str(args.scale), "-o", str(proc) + "/"]
-                   + [str(m) for m in mics], check=True)
+    print(f"preprocess {len(mics)} micrographs (scale {args.scale}, {args.workers} workers)…", flush=True)
+    subprocess.run([TOPAZ_BIN, "preprocess", "-s", str(args.scale), "--num-workers",
+                    str(args.workers), "-o", str(proc) + "/"] + [str(m) for m in mics], check=True)
     procs = sorted(proc.glob("*.mrc"))
     picks_txt = out / "_all_picks.txt"
     print(f"extract with {args.model} (r={args.radius})…", flush=True)
