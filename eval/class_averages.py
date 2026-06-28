@@ -31,6 +31,7 @@ def main() -> int:
     ap.add_argument("--size", type=int, default=64, help="resized particle size")
     ap.add_argument("--n-classes", type=int, default=8)
     ap.add_argument("--max-particles", type=int, default=350)
+    ap.add_argument("--min-count", type=int, default=8, help="hide classes with fewer members")
     ap.add_argument("--out", default="/workspace/class_averages.png")
     args = ap.parse_args()
 
@@ -54,14 +55,23 @@ def main() -> int:
     stack = np.concatenate(crops_all)[:args.max_particles]
     print(f"kept particles for 2D classification: {len(stack)}")
     avgs, labels, counts = class2d.classify_2d(stack, n_classes=args.n_classes)
-    mont = class2d.montage(avgs, counts)
+
+    # show only well-populated classes (singletons are just noise)
+    keep = [i for i in range(len(avgs)) if counts[i] >= args.min_count]
+    avgs, counts = avgs[keep], counts[keep]
+    cols = max(1, len(avgs))
 
     plt.style.use("dark_background")
-    fig, ax = plt.subplots(figsize=(7.5, 4.2), dpi=80)
-    ax.imshow(mont, cmap="gray")
-    ax.set_title(f"2D class averages — {len(stack)} kept {args.empiar} particles "
-                 f"→ {len(avgs)} classes  (counts {counts.tolist()})", fontsize=8)
-    ax.set_axis_off()
+    fig, axes = plt.subplots(1, cols, figsize=(2.0 * cols, 2.4), dpi=85)
+    axes = np.atleast_1d(axes)
+    for ax, a, c in zip(axes, avgs, counts):
+        ax.imshow(a, cmap="gray")
+        ax.set_title(f"{c} ptcls", fontsize=8)
+        ax.set_axis_off()
+    for ax in axes[len(avgs):]:
+        ax.set_axis_off()
+    fig.suptitle(f"CryoClear 2D class averages — {len(stack)} kept EMPIAR-{args.empiar} "
+                 f"particles (junk removed)", fontsize=9)
     fig.tight_layout()
     fig.savefig(args.out, bbox_inches="tight")
     print("WROTE", args.out, "counts", counts.tolist())
