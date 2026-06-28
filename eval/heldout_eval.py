@@ -39,11 +39,14 @@ def main() -> int:
     ap.add_argument("--box", type=int, default=config.DEMO_PARTICLE_DIAMETER_PX)
     ap.add_argument("--factor", type=int, default=4)
     ap.add_argument("--test-frac", type=float, default=0.34)
+    ap.add_argument("--max-mics", type=int, default=30, help="cap micrographs (0 = all)")
     args = ap.parse_args()
 
     raw = config.RAW / args.empiar
     mics = sorted((raw / "micrographs").glob("*.mrc"))
     gts = sorted((raw / "ground_truth").glob("*.star"))
+    if args.max_mics:
+        mics, gts = mics[:args.max_mics], gts[:args.max_mics]
     n = len(mics)
     if n < 3:
         print(f"Need >=3 micrographs (have {n}).")
@@ -52,7 +55,10 @@ def main() -> int:
     order = np.random.default_rng(0).permutation(n)
     test_idx = set(order[:n_test].tolist())
 
-    data = [_mic_data(mics[i], gts[i], args.radius, args.box, args.factor) for i in range(n)]
+    data = []
+    for i in range(n):
+        data.append(_mic_data(mics[i], gts[i], args.radius, args.box, args.factor))
+        print(f"  processed {i + 1}/{n}", flush=True)
     Xtr = np.vstack([data[i][2] for i in range(n) if i not in test_idx])
     ytr = np.concatenate([data[i][3] for i in range(n) if i not in test_idx]).astype(int)
     clf = JunkClassifier().fit(Xtr, ytr)
