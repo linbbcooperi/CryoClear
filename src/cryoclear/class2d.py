@@ -121,7 +121,7 @@ def _kmeanspp(feat, k, rng):
     return idx
 
 
-def classify_2d(crops: np.ndarray, n_classes: int = 8, n_iter: int = 12,
+def classify_2d(crops: np.ndarray, n_classes: int = 8, n_iter: int = 6,
                 n_theta: int = 72, seed: int = 0):
     """Reference-free 2D classification (translation+rotation E-M, resolution-annealed)."""
     n = len(crops)
@@ -172,9 +172,9 @@ def classify_2d(crops: np.ndarray, n_classes: int = 8, n_iter: int = 12,
             if len(members) >= 8:        # outlier rejection: drop lowest-scoring 15%
                 members = members[bscore[members] >= np.quantile(bscore[members], 0.15)]
             for i in members:
-                rc = _apply(crops[i], bang[i], (0, 0))               # rotate the original
-                dy, dx, _ = _phase_shift(_bandpass(rc, lp) * mask, refs_bp[j])
-                new[j] += _apply(rc, 0.0, (dy, dx))
+                rbp = _apply(crops_bp[i], bang[i], (0, 0))           # rotated band-pass → translation
+                dy, dx, _ = _phase_shift(rbp, refs_bp[j])
+                new[j] += _apply(crops[i], bang[i], (dy, dx))        # rotate+shift the original
             counts[j] = len(members)
             refs[j] = new[j] / max(counts[j], 1)
 
