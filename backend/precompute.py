@@ -110,6 +110,9 @@ def precompute(empiar: str, factor: int = 4, box: int | None = None,
     model = config.PROCESSED / empiar / "junk_classifier.joblib"
     if picker != "blob" and not picks_dir:
         picks_dir = str(config.PROCESSED / empiar / picker)   # e.g. .../topaz, .../cryosegnet
+    if picker != "blob":   # only include micrographs this picker actually has picks for
+        pdir = Path(picks_dir)
+        mics = [m for m in mics if (pdir / f"{m.stem}.star").exists()]
 
     tasks = [{"mic": str(m), "gt": str(gts.get(m.stem, "")) or "",
               "factor": factor, "box": box, "radius": radius, "out": str(out),
@@ -142,7 +145,7 @@ def main() -> int:
     args = ap.parse_args()
     idx = precompute(args.empiar, factor=args.factor, box=args.box, radius=args.radius,
                      workers=args.workers, picker=args.picker, picks_dir=args.picks_dir)
-    print(f"cached {len(idx['micrographs'])} micrographs -> {cache_dir(args.empiar)}")
+    print(f"cached {len(idx['micrographs'])} micrographs -> {cache_dir(args.empiar, args.picker)}")
     return 0
 
 
